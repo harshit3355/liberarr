@@ -1,4 +1,5 @@
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,16 @@ from liberarr.app import create_app
 from liberarr.container import build_services
 from liberarr.shared import db
 from liberarr.shared.config import Settings
+
+
+@pytest.fixture(autouse=True)
+def utc_tz(monkeypatch):
+    """Tests run in UTC unless they set TZ themselves."""
+    monkeypatch.setenv("TZ", "UTC")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
 
 
 @pytest.fixture

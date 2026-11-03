@@ -55,7 +55,7 @@ export function RecordingsPage() {
           <li key={r.id}>
             <Link to={`/recordings/${r.id}`} className="flex items-center gap-4 px-4 py-3 hover:bg-zinc-900">
               <span className="flex-1 truncate">{r.title ?? `Enregistrement ${r.id}`}</span>
-              <span className="text-sm text-zinc-500">{new Date(r.created_at + 'Z').toLocaleString('fr-FR')}</span>
+              <span className="text-sm text-zinc-500">{new Date(r.created_at.replace(' ', 'T') + 'Z').toLocaleString('fr-FR')}</span>
               <span className="w-16 text-right font-mono text-sm text-zinc-400">
                 {r.duration_s != null ? formatTimestamp(r.duration_s) : '—'}
               </span>

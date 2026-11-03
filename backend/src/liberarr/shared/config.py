@@ -8,7 +8,7 @@ PLACEHOLDER = "change-me"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="LIBERARR_")
+    model_config = SettingsConfigDict(env_prefix="LIBERARR_", hide_input_in_errors=True)  # never echo secrets
 
     config_dir: Path = Path("/config")
     data_dir: Path = Path("/data")

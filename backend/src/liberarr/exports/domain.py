@@ -1,5 +1,5 @@
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -12,8 +12,13 @@ END = "%% liberarr:end %%"
 _UNSAFE = re.compile(r'[/\\:*?"<>|]')
 
 
+def _local(created_at: str) -> datetime:
+    """created_at is stored in UTC by SQLite; notes use the machine's local time (TZ env)."""
+    return datetime.fromisoformat(created_at).replace(tzinfo=UTC).astimezone()
+
+
 def note_filename(recording: Recording, title: str) -> str:
-    stamp = datetime.fromisoformat(recording.created_at).strftime("%Y-%m-%d %H%M")
+    stamp = _local(recording.created_at).strftime("%Y-%m-%d %H%M")
     safe = _UNSAFE.sub("", title).strip() or f"recording {recording.id}"
     return f"{stamp} - {safe}.md"
 
@@ -22,7 +27,7 @@ def frontmatter(recording: Recording) -> str:
     return "\n".join(
         [
             "---",
-            f"date: {recording.created_at[:10]}",
+            f"date: {_local(recording.created_at):%Y-%m-%d}",
             "type: meeting",
             f"source: {recording.source}",
             f"liberarr_id: {recording.id}",

@@ -1,5 +1,6 @@
 import logging
 import shutil
+import time
 from pathlib import Path
 
 from liberarr.recordings.application import IngestRecording
@@ -32,7 +33,10 @@ class InboxWatcher:
             except NotAudioError:
                 rejected = self.inbox_dir / "rejected"
                 rejected.mkdir(exist_ok=True)
-                shutil.move(path, rejected / path.name)
+                target = rejected / path.name
+                if target.exists():  # never overwrite an earlier rejected file
+                    target = rejected / f"{path.stem}-{int(time.time())}{path.suffix}"
+                shutil.move(path, target)
                 log.warning("inbox: rejected a non-audio file")
                 continue
             if is_new:

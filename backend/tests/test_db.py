@@ -25,3 +25,10 @@ def test_settings_rejects_placeholder_secrets(tmp_path, field, value):
     assert field in str(exc.value)
     if value:
         assert value not in str(exc.value).replace(field, "")
+
+
+def test_settings_error_does_not_leak_other_secrets(tmp_path):
+    with pytest.raises(ValueError) as exc:
+        Settings(config_dir=tmp_path, data_dir=tmp_path, secret_key="change-me", admin_password="pw",
+                 api_key="k" * 64, ai_api_key="very-secret-gateway-value")
+    assert "very-secret-gateway-value" not in str(exc.value) and "input_value" not in str(exc.value)

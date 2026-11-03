@@ -21,7 +21,10 @@ def main() -> None:
     last_poll = 0.0
     while True:
         if time.monotonic() - last_poll >= settings.inbox_poll_seconds:
-            svc.inbox.poll()
+            try:
+                svc.inbox.poll()
+            except Exception:  # one bad file must not stop job processing
+                log.exception("inbox poll failed")
             last_poll = time.monotonic()
         if not svc.runner.run_once():
             time.sleep(2)

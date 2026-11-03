@@ -47,3 +47,11 @@ def test_export_path_stable_and_recreated(conn, svc, rid):
     assert svc.export.run(rid) == first
     first.unlink()
     assert svc.export.run(rid) == first and first.exists()
+
+
+def test_note_uses_local_time(conn, svc, rid, monkeypatch):
+    import time
+    monkeypatch.setenv("TZ", "Europe/Paris")
+    time.tzset()
+    path = svc.export.run(rid)  # stored 14:05 UTC = 15:05 in Paris (CET)
+    assert path.name.startswith("2026-11-03 1505")
