@@ -6,6 +6,7 @@ from collections.abc import Callable
 from liberarr import db, jobs
 from liberarr.config import Settings, get_settings
 from liberarr.jobs import Handler
+from liberarr.sources.folder import InboxWatcher
 
 log = logging.getLogger("liberarr.worker")
 
@@ -29,7 +30,7 @@ def build_handlers(settings: Settings) -> dict[str, Handler]:
 
 
 def build_pollers(settings: Settings) -> list[Callable[[sqlite3.Connection], object]]:
-    return []
+    return [InboxWatcher(settings).poll]
 
 
 def main() -> None:

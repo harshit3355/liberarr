@@ -1,7 +1,10 @@
+from contextlib import closing
+
 from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
 from liberarr import auth, db
+from liberarr.api import recordings
 from liberarr.auth import LoginLimiter
 from liberarr.config import Settings, get_settings
 
@@ -9,8 +12,8 @@ from liberarr.config import Settings, get_settings
 def create_app(settings: Settings) -> FastAPI:
     app = FastAPI(title="Liberarr")
     app.state.settings = settings
-    app.state.conn = db.connect(settings.db_path)
-    db.migrate(app.state.conn)
+    with closing(db.connect(settings.db_path)) as conn:
+        db.migrate(conn)
     app.state.login_limiter = LoginLimiter()
     app.add_middleware(
         SessionMiddleware,
@@ -20,6 +23,7 @@ def create_app(settings: Settings) -> FastAPI:
         session_cookie="liberarr_session",
     )
     app.include_router(auth.router)
+    app.include_router(recordings.router)
 
     @app.get("/api/health")
     def health() -> dict:
