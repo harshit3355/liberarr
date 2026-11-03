@@ -22,7 +22,7 @@ A self-hosted, *arr-stack-inspired app that frees Plaud recordings from the vend
 ## Code organisation (DDD)
 
 - **Backend**: one package per bounded context under `backend/src/liberarr/` — `recordings`, `transcription`, `summaries`, `exports`, `jobs`, `sources`, `auth` — plus `shared/` (config, db, AI client). Each context has up to four layers:
-  - `domain.py`: entities, value objects, pure rules, and **ports** (`Protocol`s). No I/O, no SQL, no framework imports.
+  - `domain.py`: entities, value objects, pure rules, and **ports** (`Protocol`s). No I/O, no SQL, no framework imports (exception: pydantic models for validating untrusted LLM output).
   - `application.py`: use cases (one class per use case, `run(...)`), depending only on domain ports.
   - `infrastructure.py`: adapters implementing the ports (SQLite repositories, ffmpeg, LLM/OpenAI-compatible clients, filesystem).
   - `api.py`: FastAPI routes; thin, call use cases or repositories' read models.

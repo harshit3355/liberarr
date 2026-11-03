@@ -66,8 +66,10 @@ def render_block(segments: list[dict], summary: MeetingSummary) -> str:
 def upsert_block(existing: str | None, block: str, front: str) -> str:
     if existing is None:
         return f"{front}\n{block}\n"
-    start, end = existing.find(START), existing.find(END)
-    if start != -1 and end > start:
+    # Last START with an END after it: an orphan START (owner deleted END) is left alone with the text after it.
+    start = existing.rfind(START)
+    end = existing.find(END, start) if start != -1 else -1
+    if end != -1:
         return existing[:start] + block + existing[end + len(END) :]
     return existing.rstrip("\n") + "\n\n" + block + "\n"
 

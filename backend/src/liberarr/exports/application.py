@@ -29,6 +29,8 @@ class ExportToObsidian:
         path = rec.export_path
         if path is None:
             path = self.export_dir / note_filename(rec, summary.title or rec.title or "")
+            if self.notes.read(path) is not None:  # same minute + same title: never take over another note
+                path = path.with_name(f"{path.stem} ({rec.id}){path.suffix}")
             self.recordings.set_export_path(recording_id, path)
         block = render_block(transcript.segments, summary)
         self.notes.write(path, upsert_block(self.notes.read(path), block, frontmatter(rec)))

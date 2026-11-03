@@ -3,7 +3,7 @@ import sqlite3
 import subprocess
 from pathlib import Path
 
-from liberarr.recordings.infrastructure import FfprobeAudioProbe
+from liberarr.recordings.domain import AudioProbe
 from liberarr.transcription.domain import Transcript
 
 # Mono 16 kHz Opus 32 kbps ≈ 14 MB/h, so 20-min chunks stay far below the 25 MB API limit.
@@ -11,9 +11,9 @@ FFMPEG_ENCODE = ["-ac", "1", "-ar", "16000", "-c:a", "libopus", "-b:a", "32k"]
 
 
 class FfmpegChunker:
-    def __init__(self, chunk_seconds: int = 1200) -> None:
+    def __init__(self, probe: AudioProbe, chunk_seconds: int = 1200) -> None:
+        self.probe = probe
         self.chunk_seconds = chunk_seconds
-        self.probe = FfprobeAudioProbe()
 
     def prepare(self, src: Path, workdir: Path) -> list[tuple[Path, float]]:
         workdir.mkdir(parents=True, exist_ok=True)

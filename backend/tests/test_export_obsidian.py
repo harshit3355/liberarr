@@ -55,3 +55,34 @@ def test_note_uses_local_time(conn, svc, rid, monkeypatch):
     time.tzset()
     path = svc.export.run(rid)  # stored 14:05 UTC = 15:05 in Paris (CET)
     assert path.name.startswith("2026-11-03 1505")
+
+
+def test_failed_write_keeps_existing_note(tmp_path, monkeypatch):
+    import os
+
+    from liberarr.exports.infrastructure import FileNoteStore
+
+    note = tmp_path / "n.md"
+    note.write_text("mes notes précieuses")
+    monkeypatch.setattr(os, "replace", lambda *a: (_ for _ in ()).throw(OSError("disk full")))
+    with pytest.raises(OSError):
+        FileNoteStore().write(note, "nouveau contenu")
+    assert note.read_text() == "mes notes précieuses"
+
+
+def test_same_title_same_minute_gets_distinct_notes(conn, svc, rid):
+    other = conn.execute(
+        "INSERT INTO recordings (title, source, source_ref, audio_path, created_at) "
+        "SELECT title, source, 'r2', audio_path, created_at FROM recordings WHERE id=? RETURNING id", (rid,)
+    ).fetchone()[0]
+    conn.execute("INSERT INTO transcripts SELECT ?, engine, language, text, data_json, created_at FROM transcripts WHERE recording_id=?", (other, rid))
+    conn.execute("INSERT INTO summaries SELECT ?, template, title, summary_md, mindmap, actions_json, created_at FROM summaries WHERE recording_id=?", (other, rid))
+    a, b = svc.export.run(rid), svc.export.run(other)
+    assert a != b and a.exists() and b.exists()
+
+
+def test_upsert_with_missing_end_marker_keeps_owner_text():
+    note = f"intro\n{START}\nancien bloc\nnotes perso du propriétaire\n"  # owner deleted END
+    once = upsert_block(note, f"{START}\nv1\n{END}", "---\n---\n")
+    twice = upsert_block(once, f"{START}\nv2\n{END}", "---\n---\n")
+    assert "notes perso du propriétaire" in twice and "v2" in twice and "v1" not in twice

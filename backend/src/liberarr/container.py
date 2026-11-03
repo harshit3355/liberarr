@@ -41,12 +41,11 @@ def build_services(conn: sqlite3.Connection, settings: Settings, ai_client=None)
     jobs = SqliteJobQueue(conn)
     transcripts = SqliteTranscriptRepository(conn)
     summaries = SqliteSummaryRepository(conn)
-    ingest = IngestRecording(
-        partial(transaction, conn), recordings, jobs, FfprobeAudioProbe(), LocalAudioStorage(settings.audio_dir)
-    )
+    probe = FfprobeAudioProbe()
+    ingest = IngestRecording(partial(transaction, conn), recordings, jobs, probe, LocalAudioStorage(settings.audio_dir))
     transcribe = TranscribeRecording(
         recordings,
-        FfmpegChunker(),
+        FfmpegChunker(probe),
         OpenAITranscriber(client, settings.transcribe_model),
         transcripts,
         settings.data_dir / "tmp",

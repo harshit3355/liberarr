@@ -34,14 +34,14 @@ def resp(text, start=0.0, words=True):
 
 
 def test_prepare_chunks_short_audio_single_chunk(audio_file, tmp_path):
-    chunks = FfmpegChunker().prepare(audio_file(10), tmp_path / "w")
+    chunks = FfmpegChunker(FfprobeAudioProbe()).prepare(audio_file(10), tmp_path / "w")
     assert len(chunks) == 1
     path, offset = chunks[0]
     assert offset == 0.0 and path.suffix == ".ogg"
 
 
 def test_prepare_chunks_splits_long_audio(audio_file, tmp_path):
-    chunks = FfmpegChunker(chunk_seconds=10).prepare(audio_file(25), tmp_path / "w")
+    chunks = FfmpegChunker(FfprobeAudioProbe(), chunk_seconds=10).prepare(audio_file(25), tmp_path / "w")
     assert len(chunks) == 3
     assert [o for _, o in chunks] == pytest.approx([0, 10, 20], abs=0.5)
     assert sum(probe_duration(p) for p, _ in chunks) == pytest.approx(25, abs=0.5)
