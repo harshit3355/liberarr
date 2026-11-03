@@ -7,6 +7,7 @@ from liberarr import db, jobs
 from liberarr.ai import get_client
 from liberarr.config import Settings, get_settings
 from liberarr.jobs import Handler
+from liberarr.pipeline.summarize import summarize_recording
 from liberarr.pipeline.transcribe import transcribe_recording
 from liberarr.sources.folder import InboxWatcher
 
@@ -31,6 +32,7 @@ def build_handlers(settings: Settings) -> dict[str, Handler]:
     client = get_client(settings)
     return {
         "transcribe": lambda conn, rid: transcribe_recording(conn, settings, client, rid),
+        "summarize": lambda conn, rid: summarize_recording(conn, settings, client, rid),
     }
 
 

@@ -16,7 +16,7 @@ from liberarr.ingest import NotAudioError, ingest_file
 router = APIRouter(prefix="/api/recordings", dependencies=[Depends(require_auth)])
 
 STATUS_SQL = """
-SELECT r.id, r.title, r.source, r.duration_s, r.created_at,
+SELECT r.id, COALESCE((SELECT s.title FROM summaries s WHERE s.recording_id=r.id), r.title) AS title, r.source, r.duration_s, r.created_at,
   (SELECT step || ':' || status FROM jobs j WHERE j.recording_id=r.id ORDER BY j.id DESC LIMIT 1) AS last_job
 FROM recordings r
 """
@@ -118,3 +118,20 @@ def rerun(rid: int, body: Rerun, conn: Conn) -> dict:
     except ValueError:
         raise HTTPException(status_code=400, detail="unknown step") from None
     return {"job_id": job_id}
+
+
+class ActionPatch(BaseModel):
+    done: bool
+
+
+@router.patch("/{rid}/actions/{index}")
+def patch_action(rid: int, index: int, body: ActionPatch, conn: Conn) -> list[dict]:
+    row = conn.execute("SELECT actions_json FROM summaries WHERE recording_id=?", (rid,)).fetchone()
+    actions = json.loads(row["actions_json"]) if row else []
+    if not 0 <= index < len(actions):
+        raise HTTPException(status_code=404, detail="action not found")
+    actions[index]["done"] = body.done
+    conn.execute(
+        "UPDATE summaries SET actions_json=? WHERE recording_id=?", (json.dumps(actions, ensure_ascii=False), rid)
+    )
+    return actions

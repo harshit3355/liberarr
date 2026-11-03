@@ -40,7 +40,8 @@ A self-hosted, *arr-stack-inspired app that frees Plaud recordings from the vend
 
 - **Ask before**: committing, pushing, adding a dependency, adding a compose service, changing a rule in this file, or anything touching the Plaud account.
 - **Smallest complete change.** No speculative features, options or abstractions. Reuse what exists before adding.
-- New non-trivial logic ships with a test (`uv run pytest` for backend).
+- **Tests only for critical behaviour** (data loss, security, money, parsing untrusted output, core pipeline). No tests for trivial code or for the sake of coverage.
+- **Before every push**: run the `ponytail-review` skill on the changes and fix the findings judged relevant; mention the skipped ones.
 - Verify before claiming done: run the tests/build and report real output, including failures.
 - Reverse engineering of the Plaud device/app is a **separate project**; do not mix it into app code. It only ever lands as a new source.
 - Design docs and plans live in `docs/superpowers/` and are **never versioned** (gitignored).
