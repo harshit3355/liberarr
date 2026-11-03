@@ -4,8 +4,10 @@ import time
 from collections.abc import Callable
 
 from liberarr import db, jobs
+from liberarr.ai import get_client
 from liberarr.config import Settings, get_settings
 from liberarr.jobs import Handler
+from liberarr.pipeline.transcribe import transcribe_recording
 from liberarr.sources.folder import InboxWatcher
 
 log = logging.getLogger("liberarr.worker")
@@ -26,7 +28,10 @@ def run_once(conn: sqlite3.Connection, handlers: dict[str, Handler]) -> bool:
 
 
 def build_handlers(settings: Settings) -> dict[str, Handler]:
-    return {}
+    client = get_client(settings)
+    return {
+        "transcribe": lambda conn, rid: transcribe_recording(conn, settings, client, rid),
+    }
 
 
 def build_pollers(settings: Settings) -> list[Callable[[sqlite3.Connection], object]]:
