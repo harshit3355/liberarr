@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from liberarr.pipeline.export_obsidian import END, START, export_recording, upsert_block
+from liberarr.exports.domain import END, START, upsert_block
 
 
 @pytest.fixture
@@ -33,17 +33,17 @@ def test_upsert_appends_when_no_markers():
     assert out.startswith("perso\n") and out.rstrip().endswith(END)
 
 
-def test_export_writes_note_with_block(conn, settings, rid):
-    path = export_recording(conn, settings, rid)
+def test_export_writes_note_with_block(conn, svc, rid):
+    path = svc.export.run(rid)
     text = path.read_text()
     assert path.name == "2026-11-03 1405 - Budget Q4.md"
     assert text.startswith("---\n") and f"liberarr_id: {rid}" in text
     assert "```mermaid\nmindmap" in text and "- [x] Envoyer — Julie" in text and "[01:05] On valide." in text
 
 
-def test_export_path_stable_and_recreated(conn, settings, rid):
-    first = export_recording(conn, settings, rid)
+def test_export_path_stable_and_recreated(conn, svc, rid):
+    first = svc.export.run(rid)
     conn.execute("UPDATE summaries SET title='Autre titre'")
-    assert export_recording(conn, settings, rid) == first
+    assert svc.export.run(rid) == first
     first.unlink()
-    assert export_recording(conn, settings, rid) == first and first.exists()
+    assert svc.export.run(rid) == first and first.exists()

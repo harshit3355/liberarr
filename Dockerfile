@@ -23,4 +23,4 @@ ENV LIBERARR_STATIC_DIR=/app/static
 RUN useradd --uid 1000 --create-home liberarr && mkdir -p /config /data && chown liberarr /config /data
 USER liberarr
 EXPOSE 8484
-CMD ["uvicorn", "--factory", "liberarr.api.app:build_app", "--host", "0.0.0.0", "--port", "8484"]
+CMD ["uvicorn", "--factory", "liberarr.app:build_app", "--host", "0.0.0.0", "--port", "8484"]

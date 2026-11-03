@@ -1,7 +1,7 @@
 import pytest
 
-from liberarr import db
-from liberarr.config import Settings
+from liberarr.shared import db
+from liberarr.shared.config import Settings
 
 
 def test_migrate_is_idempotent(settings):

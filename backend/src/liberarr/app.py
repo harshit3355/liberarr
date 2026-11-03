@@ -1,3 +1,5 @@
+"""HTTP composition root."""
+
 from contextlib import closing
 
 from fastapi import FastAPI
@@ -5,10 +7,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.staticfiles import StaticFiles
 
-from liberarr import auth, db
-from liberarr.api import recordings
-from liberarr.auth import LoginLimiter
-from liberarr.config import Settings, get_settings
+from liberarr.auth import api as auth_api
+from liberarr.auth.domain import LoginLimiter
+from liberarr.recordings import api as recordings_api
+from liberarr.shared import db
+from liberarr.shared.config import Settings, get_settings
+from liberarr.summaries import api as summaries_api
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -24,8 +28,8 @@ def create_app(settings: Settings) -> FastAPI:
         same_site="lax",
         session_cookie="liberarr_session",
     )
-    app.include_router(auth.router)
-    app.include_router(recordings.router)
+    for module in (auth_api, recordings_api, summaries_api):
+        app.include_router(module.router)
 
     @app.get("/api/health")
     def health() -> dict:

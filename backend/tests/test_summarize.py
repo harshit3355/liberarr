@@ -3,7 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from liberarr.pipeline.summarize import parse_summary, summarize_recording
+from liberarr.container import build_services
+from liberarr.summaries.domain import InvalidSummary, parse_summary
 
 VALID = {
     "title": "Point budget Q4",
@@ -42,13 +43,13 @@ def rid(conn):
 
 
 def test_parse_summary_rejects_non_mindmap():
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidSummary):
         parse_summary(json.dumps({**VALID, "mindmap": "graph TD; A-->B"}))
 
 
 def test_summarize_stores_summary(conn, settings, rid):
     client, chat = fake_client([json.dumps(VALID)])
-    summarize_recording(conn, settings, client, rid)
+    build_services(conn, settings, ai_client=client).summarize.run(rid)
     call = chat.calls[0]
     assert call["model"] == settings.llm_model and call["response_format"] == {"type": "json_object"}
     assert "[00:12] Julie envoie le chiffrage vendredi" in call["messages"][-1]["content"]
@@ -60,8 +61,8 @@ def test_summarize_stores_summary(conn, settings, rid):
 def test_summarize_retries_once_then_fails(conn, settings, rid):
     client, chat = fake_client(["not json", json.dumps({**VALID, "mindmap": "nope"})])
     before = conn.execute("SELECT * FROM transcripts").fetchone()[:]
-    with pytest.raises(ValueError):
-        summarize_recording(conn, settings, client, rid)
+    with pytest.raises(InvalidSummary):
+        build_services(conn, settings, ai_client=client).summarize.run(rid)
     assert len(chat.calls) == 2
     assert conn.execute("SELECT * FROM transcripts").fetchone()[:] == before
     assert conn.execute("SELECT count(*) FROM summaries").fetchone()[0] == 0

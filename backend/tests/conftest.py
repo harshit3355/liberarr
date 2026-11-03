@@ -4,9 +4,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from liberarr import db
-from liberarr.api.app import create_app
-from liberarr.config import Settings
+from liberarr.app import create_app
+from liberarr.container import build_services
+from liberarr.shared import db
+from liberarr.shared.config import Settings
 
 
 @pytest.fixture
@@ -31,6 +32,11 @@ def conn(settings: Settings):
     db.migrate(c)
     yield c
     c.close()
+
+
+@pytest.fixture
+def svc(conn, settings):
+    return build_services(conn, settings, ai_client=object())
 
 
 @pytest.fixture

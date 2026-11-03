@@ -1,35 +1,7 @@
-import hmac
-import time
-from collections import defaultdict, deque
-
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
-MAX_FAILURES = 5
-WINDOW_SECONDS = 15 * 60
-
-
-class LoginLimiter:
-    """In-memory, per client IP. shortcut: resets on restart and is per-process; upgrade if run with several API workers."""
-
-    def __init__(self) -> None:
-        self._failures: dict[str, deque[float]] = defaultdict(deque)
-
-    def _recent(self, ip: str) -> deque[float]:
-        q = self._failures[ip]
-        cutoff = time.monotonic() - WINDOW_SECONDS
-        while q and q[0] < cutoff:
-            q.popleft()
-        return q
-
-    def blocked(self, ip: str) -> bool:
-        return len(self._recent(ip)) >= MAX_FAILURES
-
-    def fail(self, ip: str) -> None:
-        self._recent(ip).append(time.monotonic())
-
-    def reset(self, ip: str) -> None:
-        self._failures.pop(ip, None)
+from liberarr.auth.domain import secrets_match
 
 
 def require_auth(request: Request) -> None:
@@ -37,7 +9,7 @@ def require_auth(request: Request) -> None:
     if request.session.get("user"):
         return
     key = request.headers.get("x-api-key")
-    if key and hmac.compare_digest(key.encode(), settings.api_key.encode()):
+    if key and secrets_match(key, settings.api_key):
         return
     raise HTTPException(status_code=401, detail="not authenticated")
 
@@ -57,8 +29,8 @@ def login(creds: Credentials, request: Request) -> Response:
     ip = request.client.host if request.client else "unknown"
     if limiter.blocked(ip):
         raise HTTPException(status_code=429, detail="too many failed attempts")
-    ok_user = hmac.compare_digest(creds.username.encode(), settings.admin_username.encode())
-    ok_pass = hmac.compare_digest(creds.password.encode(), settings.admin_password.encode())
+    ok_user = secrets_match(creds.username, settings.admin_username)
+    ok_pass = secrets_match(creds.password, settings.admin_password)
     if not (ok_user and ok_pass):
         limiter.fail(ip)
         raise HTTPException(status_code=401, detail="invalid credentials")

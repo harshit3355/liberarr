@@ -1,6 +1,6 @@
 from openai import OpenAI
 
-from liberarr.config import Settings
+from liberarr.shared.config import Settings
 
 
 def get_client(settings: Settings) -> OpenAI:

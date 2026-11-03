@@ -19,6 +19,17 @@ A self-hosted, *arr-stack-inspired app that frees Plaud recordings from the vend
 9. **Portability:** state lives in `/config` and `/data`; secrets key in `.env`. Nothing machine-specific in images.
 10. **Single admin user** for now. Do not build multi-user scaffolding until asked.
 
+## Code organisation (DDD)
+
+- **Backend**: one package per bounded context under `backend/src/liberarr/` — `recordings`, `transcription`, `summaries`, `exports`, `jobs`, `sources`, `auth` — plus `shared/` (config, db, AI client). Each context has up to four layers:
+  - `domain.py`: entities, value objects, pure rules, and **ports** (`Protocol`s). No I/O, no SQL, no framework imports.
+  - `application.py`: use cases (one class per use case, `run(...)`), depending only on domain ports.
+  - `infrastructure.py`: adapters implementing the ports (SQLite repositories, ffmpeg, LLM/OpenAI-compatible clients, filesystem).
+  - `api.py`: FastAPI routes; thin, call use cases or repositories' read models.
+- Dependencies point inward: `api`/`infrastructure` → `application` → `domain`. A context may use another context's **domain** (ports/entities), never its infrastructure — except through the composition root.
+- Wiring happens only in the composition roots: `container.py` (`build_services`), `app.py` (HTTP), `worker.py` (worker).
+- **Frontend** mirrors the contexts: `frontend/src/features/<context>/` (API hooks, types, components), shared code in `frontend/src/shared/`.
+
 ## Stack
 
 - Backend: Python, managed with **`uv`** (`uv add`, `uv run`; no pip/poetry). FastAPI, SQLite (FTS5 for search).
