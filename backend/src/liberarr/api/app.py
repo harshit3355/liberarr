@@ -1,7 +1,9 @@
 from contextlib import closing
 
 from fastapi import FastAPI
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.staticfiles import StaticFiles
 
 from liberarr import auth, db
 from liberarr.api import recordings
@@ -29,7 +31,21 @@ def create_app(settings: Settings) -> FastAPI:
     def health() -> dict:
         return {"status": "ok"}
 
+    if settings.static_dir:
+        app.mount("/", SpaStaticFiles(directory=settings.static_dir, html=True), name="ui")
     return app
+
+
+class SpaStaticFiles(StaticFiles):
+    """Serve the built UI; unknown non-API paths fall back to index.html for client-side routing."""
+
+    async def get_response(self, path, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404 or path.startswith("api/"):
+                raise
+            return await super().get_response("index.html", scope)
 
 
 def build_app() -> FastAPI:
