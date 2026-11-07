@@ -1,7 +1,5 @@
 //! Ogg page integrity check (capture pattern, CRC, page sequence continuity) and the Ogg Opus splitter.
-use crate::transcription::AudioSplitter;
 use crate::{Error, Result};
-use std::path::Path;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum OggError {
@@ -166,17 +164,6 @@ pub fn split_ogg(data: &[u8], max_bytes: usize) -> Result<Vec<(Vec<u8>, f64)>> {
     }
     parts.push((build_part(&headers, &cur), start));
     Ok(parts)
-}
-
-/// Reads the file whole: recordings are tens of MB at most.
-pub struct OggSplitter;
-
-impl AudioSplitter for OggSplitter {
-    fn split(&self, path: &Path, max_bytes: usize) -> Result<Vec<(Vec<u8>, f64)>> {
-        let data = std::fs::read(path)
-            .map_err(|e| Error::Storage(format!("audio unreadable: {}", e.kind())))?;
-        split_ogg(&data, max_bytes)
-    }
 }
 
 #[cfg(test)]

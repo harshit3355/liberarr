@@ -1,8 +1,10 @@
-//! Filesystem adapters: atomic note writes, device-pull scratch space, audio storage.
+//! Filesystem adapters: atomic note writes, device-pull scratch space, audio storage and splitting.
 //! Files holding recordings or keys are created 0600, their directories 0700.
+use liberarr_core::audio::ogg::split_ogg;
 use liberarr_core::device::ports::PartialStore;
 use liberarr_core::exports::NoteStore;
 use liberarr_core::recordings::{AudioStore, StoredAudio};
+use liberarr_core::transcription::AudioSplitter;
 use liberarr_core::{Error, Result};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
@@ -193,6 +195,17 @@ impl AudioStore for FsAudioStore {
             path: dest,
             duration_s: None,
         })
+    }
+}
+
+/// Reads the file whole: recordings are tens of MB at most.
+pub struct OggSplitter;
+
+impl AudioSplitter for OggSplitter {
+    fn split(&self, path: &Path, max_bytes: usize) -> Result<Vec<(Vec<u8>, f64)>> {
+        let data = fs::read(path)
+            .map_err(|e| Error::Storage(format!("audio unreadable: {}", e.kind())))?;
+        split_ogg(&data, max_bytes)
     }
 }
 

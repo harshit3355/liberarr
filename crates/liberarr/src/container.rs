@@ -1,6 +1,5 @@
 //! Composition root: the one place where adapters are wired to the core ports.
 use crate::config::{Config, Profile};
-use liberarr_core::audio::ogg::OggSplitter;
 use liberarr_core::exports::ExportToObsidian;
 use liberarr_core::jobs::{Job, JobInfo, JobQueue, StepHandler, run_job_once};
 use liberarr_core::recordings::{Ingest, Recording, RecordingItem, RecordingRepo};
@@ -8,7 +7,7 @@ use liberarr_core::summaries::{MeetingSummary, Summarize, SummaryRepo, ToggleAct
 use liberarr_core::transcription::{Transcribe, Transcript, TranscriptRepo};
 use liberarr_core::{Error, Result};
 use liberarr_infra::ai::OpenAiCompat;
-use liberarr_infra::files::{FsAudioStore, FsNoteStore, FsPartialStore};
+use liberarr_infra::files::{FsAudioStore, FsNoteStore, FsPartialStore, OggSplitter};
 use liberarr_infra::keystore::FileKeyStore;
 use liberarr_infra::sqlite::Db;
 use liberarr_web::Backend;
