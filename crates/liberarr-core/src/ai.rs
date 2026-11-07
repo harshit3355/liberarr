@@ -68,7 +68,13 @@ pub fn capability(p: Provider, model: &str) -> Capability {
             | "gpt-4o-transcribe-diarize",
         ) => Some(Timestamps::TextOnly),
         (Provider::Mistral, m) if m.starts_with("voxtral") => Some(Timestamps::Segments),
-        // Azure models are deployment names: nothing can be known upfront.
+        // shortcut: deployment names are free-form, so whisper is guessed from the name; add an
+        // explicit setting if someone names a whisper deployment otherwise.
+        (Provider::Azure, m) => Some(if m.to_lowercase().contains("whisper") {
+            Timestamps::Segments
+        } else {
+            Timestamps::TextOnly
+        }),
         _ => Some(Timestamps::Unknown),
     };
     Capability { transcription }

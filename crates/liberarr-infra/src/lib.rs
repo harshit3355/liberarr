@@ -2,6 +2,7 @@
 
 pub mod ai;
 pub mod anthropic;
+pub mod azure;
 pub mod ble;
 pub mod files;
 mod http;

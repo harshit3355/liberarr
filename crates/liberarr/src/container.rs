@@ -13,6 +13,7 @@ use liberarr_core::transcription::{
 use liberarr_core::{Error, Result};
 use liberarr_infra::ai::OpenAiCompat;
 use liberarr_infra::anthropic::AnthropicLlm;
+use liberarr_infra::azure::AzureTranscriber;
 use liberarr_infra::files::{FsAudioStore, FsNoteStore, FsPartialStore, OggSplitter};
 use liberarr_infra::keystore::FileKeyStore;
 use liberarr_infra::mistral::MistralTranscriber;
@@ -32,6 +33,7 @@ pub struct App {
 enum AnyTranscriber {
     Compat(OpenAiCompat),
     Mistral(MistralTranscriber),
+    Azure(AzureTranscriber),
 }
 
 enum AnyLlm {
@@ -43,6 +45,7 @@ fn transcriber(p: &Profile) -> AnyTranscriber {
     let (url, key, model) = (p.base_url.clone(), p.api_key.clone(), p.model.clone());
     match p.provider {
         Provider::Mistral => AnyTranscriber::Mistral(MistralTranscriber::new(url, key, model)),
+        Provider::Azure => AnyTranscriber::Azure(AzureTranscriber::new(url, key, model)),
         provider => {
             // Models known to return text only reject `verbose_json`.
             let ask_segments =
@@ -65,6 +68,7 @@ impl Transcriber for AnyTranscriber {
         match self {
             Self::Compat(t) => t.transcribe(audio, filename).await,
             Self::Mistral(t) => t.transcribe(audio, filename).await,
+            Self::Azure(t) => t.transcribe(audio, filename).await,
         }
     }
 
@@ -72,6 +76,7 @@ impl Transcriber for AnyTranscriber {
         match self {
             Self::Compat(t) => t.engine(),
             Self::Mistral(t) => t.engine(),
+            Self::Azure(t) => t.engine(),
         }
     }
 }

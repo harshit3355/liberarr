@@ -70,7 +70,12 @@ pub(crate) fn chunk_result(r: &Value) -> Result<ChunkResult> {
         })
         .unwrap_or_default();
     Ok(ChunkResult {
-        language: r.get("language").and_then(Value::as_str).map(String::from),
+        // Azure's `gpt-transcribe` replies with a `languages` array instead.
+        language: r
+            .get("language")
+            .or_else(|| r.pointer("/languages/0"))
+            .and_then(Value::as_str)
+            .map(String::from),
         text: text.to_string(),
         segments,
     })
