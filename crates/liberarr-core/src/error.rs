@@ -13,6 +13,9 @@ pub enum Error {
     Storage(String),
     #[error("provider: {0}")]
     Provider(String),
+    /// An input the app refuses by design; the message is shown to the owner as is.
+    #[error("{0}")]
+    Unsupported(String),
     #[error("device: {0}")]
     Device(String),
 }

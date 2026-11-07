@@ -15,6 +15,10 @@ serde_json = { workspace = true }
 rusqlite = { workspace = true }
 # spawn_blocking for the synchronous SQLite adapters (core stays runtime-free).
 tokio = { workspace = true, features = ["rt"] }
+# rustls only: no OpenSSL on the host.
+reqwest = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt", "macros"] }
+tokio = { workspace = true, features = ["rt", "macros", "net"] }
+# In-process mock provider for the AI client tests.
+axum = { workspace = true }
