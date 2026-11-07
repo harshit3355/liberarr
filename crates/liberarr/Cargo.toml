@@ -20,7 +20,6 @@ axum = { workspace = true }
 getrandom = { workspace = true }
 rpassword = { workspace = true }
 
-
 [dev-dependencies]
 # Builds the mock provider's chat reply in the end-to-end test.
 serde_json = { workspace = true }

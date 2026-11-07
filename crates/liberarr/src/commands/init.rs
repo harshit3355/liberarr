@@ -3,7 +3,7 @@
 use super::{Outcome, ask};
 use crate::config::{self, is_unset, parse_env};
 use std::io::Write;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::process::ExitCode;
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
@@ -116,6 +116,7 @@ pub fn run() -> Outcome {
         }
     }
     if updates.is_empty() {
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         println!("{} est déjà complet : rien à changer.", path.display());
         return Ok(ExitCode::SUCCESS);
     }

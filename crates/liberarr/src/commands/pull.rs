@@ -2,7 +2,7 @@
 use super::{Outcome, process_and_report};
 use crate::container::{App, keys, partials};
 use liberarr_core::Result;
-use liberarr_core::device::ports::{DeviceConnector, DeviceSession, UnlockMaterial};
+use liberarr_core::device::ports::{DeviceConnector, DeviceSession, KeyStore, UnlockMaterial};
 use liberarr_core::device::protocol::Advert;
 use liberarr_core::device::pull::PullRecordings;
 use liberarr_core::jobs::JobQueue;
@@ -82,13 +82,18 @@ pub async fn run(app: &App, no_process: bool) -> Outcome {
         // Once, before any claim: requeues jobs of a dead process and marks this one as a worker.
         app.db.reset_stale().await?;
     }
+    let keys = keys(&app.cfg);
+    if keys.load()?.is_empty() {
+        eprintln!("Aucun appareil lié : lancez d'abord `liberarr link`.");
+        return Ok(ExitCode::from(2));
+    }
     let adapter = default_adapter().await?;
     let connector = Progress(BtleConnector::new(adapter.clone()));
     eprintln!("Recherche de l'appareil (environ 12 s)…");
     let report = PullRecordings {
         scanner: &BtleScanner::new(adapter),
         connector: &connector,
-        keys: &keys(&app.cfg),
+        keys: &keys,
         ledger: &app.db,
         partials: &partials(&app.cfg),
         ingest: app.ingest(),

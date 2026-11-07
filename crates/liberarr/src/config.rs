@@ -1,5 +1,5 @@
-//! `<LIBERARR_HOME>/.env` is the one source of secrets and settings; a variable set in the process
-//! environment overrides the file. Errors name the variable, never its value.
+//! `<LIBERARR_HOME>/.env` is the one source of secrets and settings (only `LIBERARR_HOME`, which
+//! locates it, comes from the environment). Errors name the variable, never its value.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -70,9 +70,7 @@ pub fn load(home: &Path) -> Result<Config, String> {
         }
         Err(e) => return Err(format!("impossible de lire le fichier .env : {}", e.kind())),
     };
-    load_from(home, |k| {
-        std::env::var(k).ok().or_else(|| file.get(k).cloned())
-    })
+    load_from(home, |k| file.get(k).cloned())
 }
 
 fn load_from(home: &Path, get: impl Fn(&str) -> Option<String>) -> Result<Config, String> {

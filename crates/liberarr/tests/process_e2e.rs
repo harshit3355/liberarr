@@ -92,10 +92,6 @@ async fn mock_provider() -> String {
 
 fn liberarr(home: &Path) -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_liberarr"));
-    // The developer's own LIBERARR_* variables would override the test's .env.
-    for (k, _) in std::env::vars().filter(|(k, _)| k.starts_with("LIBERARR_")) {
-        c.env_remove(k);
-    }
     c.env("LIBERARR_HOME", home);
     c
 }
