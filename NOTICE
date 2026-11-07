@@ -1,0 +1,20 @@
+Liberarr
+Copyright (c) 2026 Hocine Hacherouf and Liberarr contributors. MIT licensed (see LICENSE).
+
+Liberarr is an independent project. It is not affiliated with, endorsed by or
+sponsored by Plaud. "Plaud" and "Plaud Note Pro" are named only to describe
+the devices Liberarr works with.
+
+Credits
+-------
+The Bluetooth protocol facts Liberarr relies on (advertisement format, unlock
+handshake, command framing, file header and encryption layout) are documented
+in PLAUD_NOTE_PRO_PROTOCOL.md of roopen219/plaude-archiver (MIT licensed).
+Liberarr contains no code from that project; it implements the documented
+facts independently.
+
+Known advisories
+----------------
+RUSTSEC-2023-0071 (rsa crate, timing side channel on private-key decryption)
+is acknowledged in deny.toml. Liberarr is a local tool: the private key never
+faces a remote decryption oracle.

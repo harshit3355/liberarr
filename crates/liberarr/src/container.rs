@@ -1,0 +1,141 @@
+//! Composition root: the one place where adapters are wired to the core ports.
+use crate::config::{Config, Profile};
+use liberarr_core::exports::ExportToObsidian;
+use liberarr_core::jobs::{Job, JobInfo, JobQueue, StepHandler, run_job_once};
+use liberarr_core::recordings::{Ingest, Recording, RecordingItem, RecordingRepo};
+use liberarr_core::summaries::{MeetingSummary, Summarize, SummaryRepo, ToggleAction};
+use liberarr_core::transcription::{Transcribe, Transcript, TranscriptRepo};
+use liberarr_core::{Error, Result};
+use liberarr_infra::ai::OpenAiCompat;
+use liberarr_infra::files::{FsAudioStore, FsNoteStore, FsPartialStore, OggSplitter};
+use liberarr_infra::keystore::FileKeyStore;
+use liberarr_infra::sqlite::Db;
+use liberarr_web::Backend;
+use std::path::PathBuf;
+
+pub struct App {
+    pub cfg: Config,
+    pub db: Db,
+    transcriber: OpenAiCompat,
+    llm: OpenAiCompat,
+    audio: FsAudioStore,
+}
+
+fn client(p: &Profile) -> OpenAiCompat {
+    OpenAiCompat::new(p.base_url.clone(), p.api_key.clone(), p.model.clone())
+}
+
+impl App {
+    /// Synchronous (`Db::open` may wait on a busy database): call it before entering async code.
+    pub fn open(cfg: Config) -> Result<App> {
+        std::fs::create_dir_all(&cfg.home)
+            .map_err(|e| Error::Storage(format!("create home: {}", e.kind())))?;
+        let db = Db::open(&cfg.home.join("liberarr.db"))?;
+        Ok(App {
+            transcriber: client(&cfg.transcribe),
+            llm: client(&cfg.llm),
+            audio: FsAudioStore {
+                audio: audio_dir(&cfg),
+            },
+            db,
+            cfg,
+        })
+    }
+
+    pub fn ingest(&self) -> Ingest<'_, Db, Db, FsAudioStore> {
+        Ingest {
+            recordings: &self.db,
+            jobs: &self.db,
+            store: &self.audio,
+        }
+    }
+
+    /// Runs queued jobs until the queue is empty. `Db::reset_stale` must have run once before.
+    pub async fn drain(&self) -> Result<()> {
+        while run_job_once(&self.db, self).await? {}
+        Ok(())
+    }
+}
+
+/// `<home>/audio`: shared by the partial store (staging) and the audio store (move vs copy rule).
+fn audio_dir(cfg: &Config) -> PathBuf {
+    cfg.home.join("audio")
+}
+
+pub fn keys(cfg: &Config) -> FileKeyStore {
+    FileKeyStore::new(cfg.home.join("device").join("keys.bin"), &cfg.secret_key)
+}
+
+pub fn partials(cfg: &Config) -> FsPartialStore {
+    FsPartialStore {
+        dir: cfg.home.join("device").join("partial"),
+        raw: cfg.home.join("device").join("raw"),
+        audio: audio_dir(cfg),
+    }
+}
+
+impl StepHandler for App {
+    async fn run(&self, job: &Job) -> Result<()> {
+        let id = job.recording_id;
+        match job.step.as_str() {
+            "transcribe" => {
+                Transcribe {
+                    recordings: &self.db,
+                    splitter: &OggSplitter,
+                    transcriber: &self.transcriber,
+                    transcripts: &self.db,
+                }
+                .run(id)
+                .await
+            }
+            "summarize" => Summarize {
+                transcripts: &self.db,
+                llm: &self.llm,
+                summaries: &self.db,
+            }
+            .run(id)
+            .await
+            .map(drop),
+            "export" => ExportToObsidian {
+                recordings: &self.db,
+                transcripts: &self.db,
+                summaries: &self.db,
+                notes: &FsNoteStore,
+                vault: self.cfg.obsidian.clone(),
+                tz: jiff::tz::TimeZone::system(),
+            }
+            .run(id)
+            .await
+            .map(drop),
+            other => Err(Error::Unsupported(format!("unknown step `{other}`"))),
+        }
+    }
+}
+
+impl Backend for App {
+    async fn list(&self) -> Result<Vec<RecordingItem>> {
+        self.db.list_items().await
+    }
+    async fn recording(&self, id: i64) -> Result<Option<Recording>> {
+        RecordingRepo::get(&self.db, id).await
+    }
+    async fn transcript(&self, id: i64) -> Result<Option<Transcript>> {
+        TranscriptRepo::get(&self.db, id).await
+    }
+    async fn summary(&self, id: i64) -> Result<Option<MeetingSummary>> {
+        SummaryRepo::get(&self.db, id).await
+    }
+    async fn jobs(&self, id: i64) -> Result<Vec<JobInfo>> {
+        self.db.list_for(id).await
+    }
+    async fn enqueue(&self, id: i64, step: &str) -> Result<i64> {
+        self.db.enqueue(id, step).await
+    }
+    async fn toggle_action(&self, id: i64, index: usize, done: bool) -> Result<MeetingSummary> {
+        ToggleAction {
+            summaries: &self.db,
+        }
+        .run(id, index, done)
+        .await
+    }
+}

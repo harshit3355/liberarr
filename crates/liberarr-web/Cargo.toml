@@ -1,0 +1,29 @@
+[package]
+name = "liberarr-web"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+liberarr-core = { workspace = true }
+rust-embed = { workspace = true }
+jiff = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+# Range-capable audio serving.
+tower-http = { workspace = true }
+# Constant-time secret comparisons.
+subtle = { workspace = true }
+# Session cookie: HMAC-SHA256 under an HKDF-derived key (no server-side session store).
+hmac = { workspace = true }
+hkdf = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

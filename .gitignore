@@ -1,12 +1,16 @@
 # Local agent working docs (specs, plans) — never versioned
 docs/superpowers/
 .superpowers/
+.claude-flow/
+
+# Local state and secrets
 .env
 config/
 data/
-__pycache__/
-*.pyc
-.venv/
-.pytest_cache/
-node_modules/
-frontend/dist/
+
+# Rust
+/target
+
+# Web: web/dist is built (npm run build), not committed
+web/node_modules/
+web/dist/

@@ -1,0 +1,25 @@
+[package]
+name = "liberarr"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+liberarr-core = { workspace = true }
+liberarr-infra = { workspace = true }
+liberarr-web = { workspace = true }
+clap = { workspace = true }
+jiff = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time"] }
+axum = { workspace = true }
+# `init`: generated secrets, and hidden input for keys and the Plaud token.
+getrandom = { workspace = true }
+rpassword = { workspace = true }
+
+[dev-dependencies]
+# Builds the mock provider's chat reply in the end-to-end test.
+serde_json = { workspace = true }

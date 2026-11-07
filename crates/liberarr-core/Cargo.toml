@@ -1,0 +1,27 @@
+[package]
+name = "liberarr-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+jiff.workspace = true
+thiserror.workspace = true
+# serde only validates untrusted LLM output (AGENTS.md exception).
+serde.workspace = true
+serde_json.workspace = true
+
+# Device protocol crypto (pure Rust, no I/O).
+rsa.workspace = true
+chacha20poly1305.workspace = true
+chacha20.workspace = true
+# serial_hash for the pull ledger.
+sha2.workspace = true
+
+[dev-dependencies]
+# Seeded RNG so in-test RSA keys are deterministic (rsa 0.9 uses rand_core 0.6).
+rand_chacha.workspace = true

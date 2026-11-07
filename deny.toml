@@ -1,0 +1,21 @@
+[advisories]
+ignore = [
+    # `rsa` (used later for the device key exchange): timing side channel on private-key decryption.
+    # Liberarr is a local tool and never exposes a decryption oracle to a remote party.
+    { id = "RUSTSEC-2023-0071", reason = "local tool, no remote decryption oracle" },
+]
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+    # webpki-root-certs (TLS roots via reqwest/rustls-platform-verifier): permissive data license.
+    "CDLA-Permissive-2.0",
+]
