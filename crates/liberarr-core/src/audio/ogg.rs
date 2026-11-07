@@ -44,12 +44,13 @@ fn page_crc(page: &[u8]) -> u32 {
 }
 
 /// Every page must start with `OggS`, carry a valid CRC and follow the previous page's sequence
-/// number; the data must end exactly on a page boundary. Assumes one logical stream.
+/// number of its own logical stream (Plaud interleaves its `PLAUD.AI` stream with the Opus one);
+/// the data must end exactly on a page boundary.
 pub fn verify_ogg(data: &[u8]) -> Result<(), OggError> {
     if data.is_empty() {
         return Err(OggError::Empty);
     }
-    let (mut rest, mut prev, mut n) = (data, None::<u32>, 0usize);
+    let (mut rest, mut last, mut n) = (data, std::collections::HashMap::<u32, u32>::new(), 0usize);
     while !rest.is_empty() {
         let bad = OggError::BadPage(n);
         let head = rest
@@ -69,11 +70,15 @@ pub fn verify_ogg(data: &[u8]) -> Result<(), OggError> {
         if u32::from_le_bytes([page[22], page[23], page[24], page[25]]) != page_crc(page) {
             return Err(OggError::BadCrc(n));
         }
+        let serial = u32::from_le_bytes([page[14], page[15], page[16], page[17]]);
         let seq = u32::from_le_bytes([page[18], page[19], page[20], page[21]]);
-        if prev.is_some_and(|p| seq != p.wrapping_add(1)) {
+        if last
+            .insert(serial, seq)
+            .is_some_and(|p| seq != p.wrapping_add(1))
+        {
             return Err(OggError::BadSequence(n));
         }
-        (rest, prev, n) = (tail, Some(seq), n + 1);
+        (rest, n) = (tail, n + 1);
     }
     Ok(())
 }
@@ -127,7 +132,16 @@ pub fn split_ogg(data: &[u8], max_bytes: usize) -> Result<Vec<(Vec<u8>, f64)>> {
     }
     let bad = |why: &str| Error::Unsupported(format!("Ogg Opus non pris en charge : {why}"));
     verify_ogg(data).map_err(|e| bad(&e.to_string()))?;
+    // Plaud files interleave a second `PLAUD.AI` stream: keep only the Opus one.
     let all = pages(data);
+    let opus = all
+        .iter()
+        .find(|p| p[27 + p[26] as usize..].starts_with(b"OpusHead"))
+        .map(|p| p[14..18].to_vec());
+    let all: Vec<&[u8]> = all
+        .into_iter()
+        .filter(|p| opus.as_deref().is_none_or(|s| &p[14..18] == s))
+        .collect();
     let [head, tags, rest @ ..] = &all[..] else {
         return Err(bad("en-têtes absents"));
     };
@@ -279,6 +293,39 @@ pub(crate) mod tests {
         assert_eq!(bodies, [1, 2, 3, 4, 5, 6]);
         // Small enough input is returned whole.
         assert_eq!(split_ogg(&data, data.len()).unwrap(), [(data, 0.0)]);
+    }
+
+    /// The same page with another stream serial (CRC recomputed).
+    fn with_serial(mut p: Vec<u8>, serial: u32) -> Vec<u8> {
+        p[14..18].copy_from_slice(&serial.to_le_bytes());
+        p[22..26].fill(0);
+        let c = crc(&p);
+        p[22..26].copy_from_slice(&c.to_le_bytes());
+        p
+    }
+
+    #[test]
+    fn interleaved_second_stream_is_verified_and_dropped_on_split() {
+        // Plaud interleaves a `PLAUD.AI` stream (own serial, own sequence) with the Opus one.
+        let data = opus_stream();
+        let opus = pages(&data);
+        let side: Vec<Vec<u8>> = (0..opus.len() as u32)
+            .map(|i| with_serial(page(i, b"PLAUD.AI"), 9))
+            .collect();
+        let mixed: Vec<u8> = opus
+            .iter()
+            .zip(&side)
+            .flat_map(|(a, b)| [a.to_vec(), b.clone()].concat())
+            .collect();
+        assert_eq!(verify_ogg(&mixed), Ok(()));
+
+        let headers = page(0, &[0; 19]).len() + page(1, b"OpusTags").len();
+        let parts = split_ogg(&mixed, headers + 2 * page(2, &[0; 100]).len()).unwrap();
+        assert_eq!(parts.len(), 3);
+        for (bytes, _) in &parts {
+            assert_eq!(verify_ogg(bytes), Ok(()));
+            assert!(!bytes.windows(8).any(|w| w == b"PLAUD.AI"));
+        }
     }
 
     #[test]
