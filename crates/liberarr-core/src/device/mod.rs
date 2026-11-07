@@ -4,7 +4,13 @@
 //! Every parser takes untrusted device bytes and returns `None`/`Err` on short or malformed input.
 pub mod crypto;
 pub mod file;
+pub mod link;
+pub mod ports;
 pub mod protocol;
+pub mod pull;
+
+#[cfg(test)]
+pub(crate) mod fakes;
 
 #[cfg(test)]
 pub(crate) mod testkey {

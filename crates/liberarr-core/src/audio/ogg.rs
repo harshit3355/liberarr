@@ -78,7 +78,7 @@ pub fn verify_ogg(data: &[u8]) -> Result<(), OggError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Independent bitwise CRC (poly 0x04C11DB7, MSB first, init 0, no final xor) to build pages.
@@ -97,7 +97,7 @@ mod tests {
         c
     }
 
-    fn page(seq: u32, body: &[u8]) -> Vec<u8> {
+    pub(crate) fn page(seq: u32, body: &[u8]) -> Vec<u8> {
         let mut p = b"OggS".to_vec();
         p.extend_from_slice(&[0, if seq == 0 { 2 } else { 0 }]);
         p.extend_from_slice(&[0; 8]); // granule
