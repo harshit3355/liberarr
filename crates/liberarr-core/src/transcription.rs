@@ -3,9 +3,6 @@ use crate::recordings::RecordingRepo;
 use crate::{Error, Result};
 use std::path::Path;
 
-/// Transcription APIs cap uploads at 25 MB; stay under.
-pub const MAX_CHUNK_BYTES: usize = 24 * 1024 * 1024;
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct Segment {
     pub start: f64,
@@ -91,6 +88,8 @@ pub struct Transcribe<'a, R, P, T, S> {
     pub splitter: &'a P,
     pub transcriber: &'a T,
     pub transcripts: &'a S,
+    /// Largest upload the transcription provider accepts.
+    pub max_chunk_bytes: usize,
 }
 
 impl<R: RecordingRepo, P: AudioSplitter, T: Transcriber, S: TranscriptRepo>
@@ -110,7 +109,7 @@ impl<R: RecordingRepo, P: AudioSplitter, T: Transcriber, S: TranscriptRepo>
         let mut results = Vec::new();
         for (i, (bytes, offset)) in self
             .splitter
-            .split(&rec.audio_path, MAX_CHUNK_BYTES)?
+            .split(&rec.audio_path, self.max_chunk_bytes)?
             .into_iter()
             .enumerate()
         {

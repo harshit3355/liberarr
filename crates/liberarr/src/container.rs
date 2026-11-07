@@ -1,14 +1,21 @@
 //! Composition root: the one place where adapters are wired to the core ports.
 use crate::config::{Config, Profile};
+use liberarr_core::ai::{Provider, Timestamps, capability};
 use liberarr_core::exports::ExportToObsidian;
 use liberarr_core::jobs::{Job, JobInfo, JobQueue, StepHandler, run_job_once};
 use liberarr_core::recordings::{Ingest, Recording, RecordingItem, RecordingRepo};
-use liberarr_core::summaries::{MeetingSummary, Summarize, SummaryRepo, ToggleAction};
-use liberarr_core::transcription::{Transcribe, Transcript, TranscriptRepo};
+use liberarr_core::summaries::{
+    ChatMessage, Llm, MeetingSummary, Summarize, SummaryRepo, ToggleAction,
+};
+use liberarr_core::transcription::{
+    ChunkResult, Transcribe, Transcriber, Transcript, TranscriptRepo,
+};
 use liberarr_core::{Error, Result};
 use liberarr_infra::ai::OpenAiCompat;
+use liberarr_infra::anthropic::AnthropicLlm;
 use liberarr_infra::files::{FsAudioStore, FsNoteStore, FsPartialStore, OggSplitter};
 use liberarr_infra::keystore::FileKeyStore;
+use liberarr_infra::mistral::MistralTranscriber;
 use liberarr_infra::sqlite::Db;
 use liberarr_web::Backend;
 use std::path::PathBuf;
@@ -16,13 +23,68 @@ use std::path::PathBuf;
 pub struct App {
     pub cfg: Config,
     pub db: Db,
-    transcriber: OpenAiCompat,
-    llm: OpenAiCompat,
+    transcriber: AnyTranscriber,
+    llm: AnyLlm,
+    /// Largest upload the transcription provider accepts.
+    max_chunk_bytes: usize,
     audio: FsAudioStore,
 }
 
-fn client(p: &Profile) -> OpenAiCompat {
-    OpenAiCompat::new(p.base_url.clone(), p.api_key.clone(), p.model.clone())
+/// The ports use `async fn` (no `dyn`), so the chosen adapter is an enum.
+enum AnyTranscriber {
+    Compat(OpenAiCompat),
+    Mistral(MistralTranscriber),
+}
+
+enum AnyLlm {
+    Compat(OpenAiCompat),
+    Anthropic(AnthropicLlm),
+}
+
+fn transcriber(p: &Profile) -> AnyTranscriber {
+    let (url, key, model) = (p.base_url.clone(), p.api_key.clone(), p.model.clone());
+    match p.provider {
+        Provider::Mistral => AnyTranscriber::Mistral(MistralTranscriber::new(url, key, model)),
+        provider => {
+            // Models known to return text only reject `verbose_json`.
+            let ask_segments =
+                capability(provider, &p.model).transcription != Some(Timestamps::TextOnly);
+            AnyTranscriber::Compat(OpenAiCompat::new(url, key, model, ask_segments))
+        }
+    }
+}
+
+fn llm(p: &Profile) -> AnyLlm {
+    let (url, key, model) = (p.base_url.clone(), p.api_key.clone(), p.model.clone());
+    match p.provider {
+        Provider::Anthropic => AnyLlm::Anthropic(AnthropicLlm::new(url, key, model)),
+        _ => AnyLlm::Compat(OpenAiCompat::new(url, key, model, true)),
+    }
+}
+
+impl Transcriber for AnyTranscriber {
+    async fn transcribe(&self, audio: &[u8], filename: &str) -> Result<ChunkResult> {
+        match self {
+            Self::Compat(t) => t.transcribe(audio, filename).await,
+            Self::Mistral(t) => t.transcribe(audio, filename).await,
+        }
+    }
+
+    fn engine(&self) -> &str {
+        match self {
+            Self::Compat(t) => t.engine(),
+            Self::Mistral(t) => t.engine(),
+        }
+    }
+}
+
+impl Llm for AnyLlm {
+    async fn complete_json(&self, messages: &[ChatMessage]) -> Result<String> {
+        match self {
+            Self::Compat(l) => l.complete_json(messages).await,
+            Self::Anthropic(l) => l.complete_json(messages).await,
+        }
+    }
 }
 
 impl App {
@@ -32,8 +94,10 @@ impl App {
             .map_err(|e| Error::Storage(format!("create home: {}", e.kind())))?;
         let db = Db::open(&cfg.home.join("liberarr.db"))?;
         Ok(App {
-            transcriber: client(&cfg.transcribe),
-            llm: client(&cfg.llm),
+            transcriber: transcriber(&cfg.transcribe),
+            llm: llm(&cfg.llm),
+            max_chunk_bytes: capability(cfg.transcribe.provider, &cfg.transcribe.model)
+                .max_upload_bytes,
             audio: FsAudioStore {
                 audio: audio_dir(&cfg),
             },
@@ -84,6 +148,7 @@ impl StepHandler for App {
                     splitter: &OggSplitter,
                     transcriber: &self.transcriber,
                     transcripts: &self.db,
+                    max_chunk_bytes: self.max_chunk_bytes,
                 }
                 .run(id)
                 .await
