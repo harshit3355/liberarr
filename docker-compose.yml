@@ -1,0 +1,39 @@
+# Secrets come only from .env (run ./scripts/init-env.sh first). Never put a value here.
+x-app: &app
+  image: liberarr:local
+  env_file: .env
+  environment:
+    LIBERARR_AI_API_KEY: ${LITELLM_MASTER_KEY}
+  volumes:
+    - ./config:/config
+    - ./data:/data
+  restart: unless-stopped
+
+services:
+  liberarr:
+    <<: *app
+    build: .
+    ports:
+      - "8484:8484"
+    depends_on:
+      - litellm
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8484/api/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "liberarr.worker"]
+    depends_on:
+      liberarr:
+        condition: service_healthy  # the API runs DB migrations first
+
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.106.0@sha256:2e4c0371f3a8c28e4da131d77abaa8341cd3b0c2fcc4d34d7c5900431af7b9d0
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    env_file: .env
+    volumes:
+      - ./litellm.yaml:/app/config.yaml:ro
+    restart: unless-stopped

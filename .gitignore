@@ -1,0 +1,12 @@
+# Local agent working docs (specs, plans) — never versioned
+docs/superpowers/
+.superpowers/
+.env
+config/
+data/
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+node_modules/
+frontend/dist/
