@@ -8,5 +8,6 @@ pub mod files;
 mod http;
 pub mod keystore;
 pub mod mistral;
+pub mod model_list;
 pub mod plaud_cloud;
 pub mod sqlite;

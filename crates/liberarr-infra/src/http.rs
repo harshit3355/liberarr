@@ -1,4 +1,4 @@
-//! Shared POST for the AI adapters. Errors carry the HTTP status and a short provider message,
+//! Shared POST and GET for the AI adapters. Errors carry the HTTP status and a short provider message,
 //! never bodies, audio, text or the key.
 use liberarr_core::{Error, Result};
 use reqwest::StatusCode;
@@ -19,7 +19,7 @@ pub(crate) fn client() -> reqwest::Client {
         .expect("reqwest client")
 }
 
-/// Sends the request, maps failures to `Error::Provider` and returns the parsed JSON reply.
+/// POSTs the request, maps failures to `Error::Provider` and returns the parsed JSON reply.
 pub(crate) async fn send(
     http: &reqwest::Client,
     url: &str,
@@ -27,7 +27,27 @@ pub(crate) async fn send(
     timeout: Duration,
     req: impl FnOnce(reqwest::RequestBuilder) -> reqwest::RequestBuilder,
 ) -> Result<Value> {
-    let builder = http.post(url).timeout(timeout);
+    exchange(http.post(url), auth, timeout, req).await
+}
+
+/// Same rules as [`send`], for a GET.
+pub(crate) async fn get(
+    http: &reqwest::Client,
+    url: &str,
+    auth: Auth<'_>,
+    timeout: Duration,
+    req: impl FnOnce(reqwest::RequestBuilder) -> reqwest::RequestBuilder,
+) -> Result<Value> {
+    exchange(http.get(url), auth, timeout, req).await
+}
+
+async fn exchange(
+    builder: reqwest::RequestBuilder,
+    auth: Auth<'_>,
+    timeout: Duration,
+    req: impl FnOnce(reqwest::RequestBuilder) -> reqwest::RequestBuilder,
+) -> Result<Value> {
+    let builder = builder.timeout(timeout);
     let builder = match auth {
         Auth::Bearer(key) => builder.bearer_auth(key),
         Auth::Header(name, key) => builder.header(name, key),

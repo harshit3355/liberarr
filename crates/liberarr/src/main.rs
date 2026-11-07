@@ -3,7 +3,9 @@ mod commands;
 mod config;
 mod container;
 mod i18n;
+mod models;
 mod providers;
+mod setup;
 
 // Catalogs are embedded at compile time: no locale file is read at runtime.
 rust_i18n::i18n!("locales", fallback = "en");
@@ -24,7 +26,12 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Create the home folder and its .env (generated secrets, AI provider keys).
-    Init,
+    Init {
+        /// Ask nothing: read LIBERARR_{TRANSCRIBE,LLM}_{PROVIDER,BASE_URL,API_KEY,MODEL} from the
+        /// environment (keys never go on the command line) and fail if one is missing.
+        #[arg(long)]
+        non_interactive: bool,
+    },
     /// Fetch the device keys from your Plaud account once, then test an unlock.
     Link {
         /// Fetch a new key pair even if one is stored.
@@ -55,8 +62,8 @@ enum Cmd {
 }
 
 fn run(cmd: Cmd) -> commands::Outcome {
-    if let Cmd::Init = cmd {
-        return commands::init::run();
+    if let Cmd::Init { non_interactive } = cmd {
+        return commands::init::run(non_interactive);
     }
     let cfg = config::load(&config::home()?)?;
     let rt = tokio::runtime::Runtime::new()?;
@@ -71,7 +78,7 @@ fn run(cmd: Cmd) -> commands::Outcome {
             Cmd::Process { files } => commands::process::run(&app, &files).await,
             Cmd::Serve { host, port } => commands::serve::run(app, host, port).await,
             Cmd::Status => commands::status::run(&app).await,
-            Cmd::Init | Cmd::Link { .. } => unreachable!("handled above"),
+            Cmd::Init { .. } | Cmd::Link { .. } => unreachable!("handled above"),
         }
     })
 }

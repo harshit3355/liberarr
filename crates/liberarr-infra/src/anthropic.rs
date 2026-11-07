@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(180);
-const API_VERSION: &str = "2026-10-21";
+pub(crate) const API_VERSION: &str = "2026-10-21";
 /// Room for a long meeting summary; hitting it is an error, not a truncated reply.
 const MAX_TOKENS: u32 = 8192;
 

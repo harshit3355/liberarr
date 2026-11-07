@@ -30,7 +30,7 @@ liberarr serve   # web UI on http://127.0.0.1:8484
 
 | Command | Purpose |
 |---|---|
-| `init` | Create the home folder and `.env`. Idempotent: values already set are kept. Prints the generated admin password once. |
+| `init` | Create the home folder and `.env`. Idempotent: values already set are kept. Tests each key and proposes models. `--non-interactive` reads `LIBERARR_{TRANSCRIBE,LLM}_{PROVIDER,BASE_URL,API_KEY,MODEL}` from the environment. Prints the generated admin password once. |
 | `link [--force]` | Paste your Plaud web-app token (hidden prompt). To find it: log in at web.plaud.ai, then in the browser DevTools open Application → Cookies and copy the `pld_ut` value. The token is used for this run only and never stored. Fetches the device keys; a key pair already stored is only replaced with `--force`. |
 | `pull [--no-process]` | Wake the device and close the Plaud app on your phone first. Resumes dropped downloads, never pulls the same recording twice, skips a recording still in progress. |
 | `process <files…>` | Run the pipeline on local audio files. |
