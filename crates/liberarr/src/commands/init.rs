@@ -160,7 +160,7 @@ pub fn run() -> Outcome {
         let provider = if missing(provider_var) && missing(url_var) {
             if step == Step::Summarize && claude_connected() {
                 println!(
-                    "Claude détecté et connecté : le fournisseur « claude » utilise ton abonnement via la CLI officielle. Usage toléré mais non garanti par Anthropic ; la clé API (« anthropic ») est recommandée."
+                    "Claude détecté et connecté : le fournisseur « claude » utilise ton abonnement via la CLI officielle. Usage toléré mais non garanti par Anthropic ; la clé API (« anthropic ») est recommandée. Tes transcriptions sont envoyées à Anthropic selon les réglages de confidentialité de ton compte."
                 );
             }
             let p = ask_provider(provider_q, step)?;

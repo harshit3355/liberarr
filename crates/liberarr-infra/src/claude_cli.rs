@@ -93,7 +93,7 @@ impl ClaudeCli {
         };
         if !status.success() {
             return Err(Error::Provider(format!(
-                "claude CLI exited with status {}",
+                "claude CLI exited with status {}: check that `claude` is up to date and logged in",
                 status.code().unwrap_or(-1)
             )));
         }
