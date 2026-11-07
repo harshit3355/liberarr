@@ -3,6 +3,7 @@
 use liberarr_core::summaries::{ChatMessage, Llm};
 use liberarr_core::transcription::{ChunkResult, Segment, Transcriber};
 use liberarr_core::{Error, Result};
+use reqwest::StatusCode;
 use reqwest::multipart::{Form, Part};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -52,10 +53,17 @@ impl OpenAiCompat {
             ))
         })?;
         let json: Option<Value> = serde_json::from_str(&body).ok();
+        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+            // Providers quote a masked key in these messages: keep only the status.
+            return Err(Error::Provider(format!(
+                "provider refused the API key (HTTP {status})"
+            )));
+        }
         if !status.is_success() {
             let msg = json
                 .as_ref()
                 .and_then(|j| j.pointer("/error/message")?.as_str())
+                .filter(|m| !m.to_lowercase().contains("key"))
                 .map(|m| format!(": {}", m.chars().take(200).collect::<String>()))
                 .unwrap_or_default();
             return Err(Error::Provider(format!("HTTP {status}{msg}")));
@@ -180,7 +188,7 @@ mod tests {
             )
             .route(
                 "/denied/audio/transcriptions",
-                post(|| async { (StatusCode::UNAUTHORIZED, r#"{"error":{"message":"Incorrect API key"}}"#) }),
+                post(|| async { (StatusCode::UNAUTHORIZED, r#"{"error":{"message":"Incorrect API key provided: sk-...abcd."}}"#) }),
             );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -216,9 +224,9 @@ mod tests {
             .transcribe(b"audio", "chunk-0.ogg")
             .await
             .unwrap_err();
-        assert!(
-            matches!(&err, Error::Provider(m) if m.contains("401") && m.contains("Incorrect API key"))
-        );
+        assert!(matches!(&err, Error::Provider(m) if m.contains("401")));
+        // The provider quotes a masked key: it must not reach job.error or the UI.
+        assert!(!err.to_string().contains("sk-...abcd"), "{err}");
         assert!(!err.to_string().contains(KEY));
         assert_eq!(client("seg").engine(), "whisper-1");
     }
