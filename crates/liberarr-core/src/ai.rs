@@ -8,7 +8,6 @@ pub enum Provider {
     /// Any OpenAI-compatible base URL (gateway such as LiteLLM).
     Compatible,
     OpenAi,
-    Azure,
     Mistral,
     Anthropic,
 }
@@ -18,7 +17,6 @@ impl Provider {
         Some(match s {
             "openai-compatible" => Provider::Compatible,
             "openai" => Provider::OpenAi,
-            "azure" => Provider::Azure,
             "mistral" => Provider::Mistral,
             "anthropic" => Provider::Anthropic,
             _ => return None,
@@ -29,7 +27,6 @@ impl Provider {
         match self {
             Provider::Compatible => "openai-compatible",
             Provider::OpenAi => "openai",
-            Provider::Azure => "azure",
             Provider::Mistral => "mistral",
             Provider::Anthropic => "anthropic",
         }
@@ -68,13 +65,6 @@ pub fn capability(p: Provider, model: &str) -> Capability {
             | "gpt-4o-transcribe-diarize",
         ) => Some(Timestamps::TextOnly),
         (Provider::Mistral, m) if m.starts_with("voxtral") => Some(Timestamps::Segments),
-        // shortcut: deployment names are free-form, so whisper is guessed from the name; add an
-        // explicit setting if someone names a whisper deployment otherwise.
-        (Provider::Azure, m) => Some(if m.to_lowercase().contains("whisper") {
-            Timestamps::Segments
-        } else {
-            Timestamps::TextOnly
-        }),
         _ => Some(Timestamps::Unknown),
     };
     Capability { transcription }

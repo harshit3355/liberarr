@@ -2,14 +2,12 @@
 //! line per case: booleans, counts and the adapters' already-sanitized errors. Never text, audio,
 //! summaries, keys or URLs.
 //!
-//! Variables (all optional, a target with missing ones is skipped): FOUNDRY_BASE_URL,
-//! FOUNDRY_API_KEY, FOUNDRY_AUDIO_DEPLOYMENTS (comma separated), FOUNDRY_CHAT_DEPLOYMENT,
-//! MISTRAL_API_KEY, OPENAI_API_KEY, PROBE_AUDIO (audio file, needed for transcription).
+//! Variables (all optional, a target with missing ones is skipped): MISTRAL_API_KEY,
+//! OPENAI_API_KEY, PROBE_AUDIO (audio file, needed for transcription).
 use liberarr_core::Result;
 use liberarr_core::summaries::{ChatMessage, Llm, Role};
 use liberarr_core::transcription::{ChunkResult, Transcriber};
 use liberarr_infra::ai::OpenAiCompat;
-use liberarr_infra::azure::AzureTranscriber;
 use liberarr_infra::mistral::MistralTranscriber;
 
 const MISTRAL_BASE: &str = "https://api.mistral.ai/v1";
@@ -67,28 +65,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => None,
     };
     let filename = "probe.ogg";
-
-    let foundry = var("FOUNDRY_BASE_URL").zip(var("FOUNDRY_API_KEY"));
-    match (&foundry, &audio, var("FOUNDRY_AUDIO_DEPLOYMENTS")) {
-        (Some((base, key)), Some(audio), Some(deployments)) => {
-            for d in deployments
-                .split(',')
-                .map(str::trim)
-                .filter(|d| !d.is_empty())
-            {
-                let t = AzureTranscriber::new(base.clone(), key.clone(), d.into());
-                show_transcript(&format!("foundry/{d}"), t.transcribe(audio, filename).await);
-            }
-        }
-        _ => println!("foundry transcription: skipped"),
-    }
-    match (&foundry, var("FOUNDRY_CHAT_DEPLOYMENT")) {
-        (Some((base, key)), Some(chat)) => {
-            let llm = OpenAiCompat::new(base.clone(), key.clone(), chat, true);
-            show_chat("foundry/chat", &llm).await;
-        }
-        _ => println!("foundry chat: skipped"),
-    }
 
     match (var("MISTRAL_API_KEY"), &audio) {
         (Some(key), Some(audio)) => {

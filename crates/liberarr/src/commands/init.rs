@@ -71,7 +71,7 @@ fn prompt(question: &str, default: Option<&str>, hidden: bool) -> std::io::Resul
 /// capability warning with the default model.
 fn ask_provider(question: &str, step: Step) -> std::io::Result<Provider> {
     loop {
-        let label = format!("{question} (openai, openai-compatible, azure, mistral, anthropic)");
+        let label = format!("{question} (openai, openai-compatible, mistral, anthropic)");
         let v = prompt(&label, Some("openai"), false)?;
         match Provider::parse(v.trim()) {
             Some(p) if supports(capability(p, ""), step) => return Ok(p),

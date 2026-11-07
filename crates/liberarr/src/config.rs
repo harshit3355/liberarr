@@ -97,9 +97,7 @@ fn load_from(home: &Path, get: impl Fn(&str) -> Option<String>) -> Result<Config
         let provider = match get(&var).filter(|v| !v.trim().is_empty()) {
             None => Provider::Compatible,
             Some(v) => Provider::parse(v.trim()).ok_or_else(|| {
-                format!(
-                    "{var} n'est pas reconnu (openai-compatible, openai, azure, mistral, anthropic)"
-                )
+                format!("{var} n'est pas reconnu (openai-compatible, openai, mistral, anthropic)")
             })?,
         };
         let model = need(&format!("LIBERARR_{p}_MODEL"))?;

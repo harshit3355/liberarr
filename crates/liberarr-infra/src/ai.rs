@@ -70,7 +70,7 @@ pub(crate) fn chunk_result(r: &Value) -> Result<ChunkResult> {
         })
         .unwrap_or_default();
     Ok(ChunkResult {
-        // Azure's `gpt-transcribe` replies with a `languages` array instead.
+        // `gpt-transcribe` replies with a `languages` array instead.
         language: r
             .get("language")
             .or_else(|| r.pointer("/languages/0"))
