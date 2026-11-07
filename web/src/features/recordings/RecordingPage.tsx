@@ -1,4 +1,5 @@
 import { useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import Markdown from 'react-markdown'
 import { Link, useParams } from 'react-router'
 import { ActionsTable } from '../summaries/ActionsTable'
@@ -6,13 +7,8 @@ import { Mindmap } from '../summaries/Mindmap'
 import { TranscriptView } from '../transcription/TranscriptView'
 import { useRecording, useRerun } from './api'
 
-const STEP_LABEL: Record<string, string> = {
-  transcribe: 'transcription',
-  summarize: 'résumé',
-  export: 'export',
-}
-
 export function RecordingPage() {
+  const { t } = useTranslation()
   const id = Number(useParams().id)
   const { data: rec, isLoading, isError } = useRecording(id)
   const rerun = useRerun(id)
@@ -24,11 +20,11 @@ export function RecordingPage() {
     void audio.current.play().catch(() => {})
   }
 
-  if (isLoading) return <p className="p-8 text-zinc-400">Chargement…</p>
+  if (isLoading) return <p className="p-8 text-zinc-400">{t('common.loading')}</p>
   if (isError || !rec)
     return (
       <p role="alert" className="p-8 text-red-400">
-        Enregistrement introuvable.
+        {t('recordings.notFound')}
       </p>
     )
 
@@ -40,9 +36,11 @@ export function RecordingPage() {
     <main className="mx-auto max-w-5xl space-y-8 px-4 py-8">
       <div>
         <Link to="/" className="text-sm text-zinc-300 underline-offset-2 hover:underline">
-          ← Enregistrements
+          {t('recordings.back')}
         </Link>
-        <h1 className="mt-2 text-2xl font-semibold">{rec.summary?.title ?? rec.title ?? `Enregistrement ${rec.id}`}</h1>
+        <h1 className="mt-2 text-2xl font-semibold">
+          {rec.summary?.title ?? rec.title ?? t('recordings.untitled', { id: rec.id })}
+        </h1>
       </div>
 
       {failedStep && (
@@ -51,26 +49,28 @@ export function RecordingPage() {
           className="flex flex-wrap items-center gap-3 rounded-lg border border-red-800 bg-red-950 p-4 text-sm"
         >
           <span className="flex-1">
-            Échec de l'étape « {STEP_LABEL[failedStep] ?? failedStep} »
-            {failedJob?.error ? ` : ${failedJob.error}` : '.'}
+            {t(failedJob?.error ? 'recordings.stepFailedWithError' : 'recordings.stepFailed', {
+              step: t(`recordings.steps.${failedStep}`, { defaultValue: failedStep }),
+              error: failedJob?.error,
+            })}
           </span>
           <button
             onClick={() => rerun.mutate(failedStep)}
             disabled={rerun.isPending}
             className="rounded-md bg-red-700 px-3 py-1.5 font-medium hover:bg-red-600 disabled:opacity-60"
           >
-            Relancer
+            {t('recordings.retry')}
           </button>
         </div>
       )}
       {rerun.isError && (
         <p role="alert" className="text-sm text-red-400">
-          Impossible de relancer l'étape.
+          {t('recordings.retryError')}
         </p>
       )}
       {rec.status === 'processing' && (
         <p role="status" className="text-sm text-sky-300">
-          Traitement en cours…
+          {t('recordings.processing')}
         </p>
       )}
 
@@ -84,18 +84,18 @@ export function RecordingPage() {
       {rec.summary && (
         <>
           <section>
-            <h2 className={h2}>Résumé</h2>
+            <h2 className={h2}>{t('summaries.summary')}</h2>
             {/* No raw HTML (react-markdown default) and no images: a remote URL in LLM output would leak. */}
             <div className="space-y-2 [&_a]:text-emerald-400 [&_a]:underline [&_h1]:mt-4 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mt-4 [&_h2]:font-semibold [&_h3]:mt-3 [&_h3]:font-semibold [&_li]:ml-5 [&_ol]:list-decimal [&_ul]:list-disc">
               <Markdown disallowedElements={['img']}>{rec.summary.summary_md}</Markdown>
             </div>
           </section>
           <section>
-            <h2 className={h2}>Carte mentale</h2>
+            <h2 className={h2}>{t('summaries.mindmap')}</h2>
             <Mindmap code={rec.summary.mindmap} />
           </section>
           <section>
-            <h2 className={h2}>Actions</h2>
+            <h2 className={h2}>{t('summaries.actions.title')}</h2>
             <ActionsTable recordingId={id} actions={rec.summary.actions} onSeek={seek} />
           </section>
         </>
@@ -103,7 +103,7 @@ export function RecordingPage() {
 
       {rec.transcript && (
         <section>
-          <h2 className={h2}>Transcription</h2>
+          <h2 className={h2}>{t('transcription.title')}</h2>
           <TranscriptView transcript={rec.transcript} audio={audio} onSeek={seek} />
         </section>
       )}

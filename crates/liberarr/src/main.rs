@@ -2,7 +2,11 @@
 mod commands;
 mod config;
 mod container;
+mod i18n;
 mod providers;
+
+// Catalogs are embedded at compile time: no locale file is read at runtime.
+rust_i18n::i18n!("locales", fallback = "en");
 
 use clap::{Parser, Subcommand};
 use std::net::IpAddr;
@@ -73,10 +77,14 @@ fn run(cmd: Cmd) -> commands::Outcome {
 }
 
 fn main() -> ExitCode {
-    match run(Cli::parse().cmd) {
+    let cmd = Cli::parse().cmd;
+    // Once, before any message is printed.
+    let lang = config::home().map_or_else(|_| i18n::env_language(), |h| i18n::ui_language(&h));
+    rust_i18n::set_locale(lang.as_str());
+    match run(cmd) {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("Erreur : {e}");
+            eprintln!("{}", rust_i18n::t!("error.prefix", message = e));
             ExitCode::FAILURE
         }
     }

@@ -3,6 +3,7 @@ use super::Outcome;
 use crate::container::{App, keys};
 use liberarr_core::device::ports::KeyStore;
 use liberarr_core::recordings::{RecordingRepo, RecordingStatus};
+use rust_i18n::t;
 use std::process::ExitCode;
 
 pub async fn run(app: &App) -> Outcome {
@@ -19,25 +20,32 @@ pub async fn run(app: &App) -> Outcome {
         })
         .collect();
     if devices.is_empty() {
-        println!("Appareils : aucun (lancez `liberarr link`)");
+        println!("{}", t!("status.devices_none"));
     } else {
-        println!("Appareils : {}", devices.join(", "));
+        println!("{}", t!("status.devices", list = devices.join(", ")));
     }
     match app.db.last_pull().await? {
-        Some(t) => println!(
-            "Dernier pull : {}",
-            t.to_zoned(jiff::tz::TimeZone::system())
-                .strftime("%Y-%m-%d %H:%M")
+        Some(at) => println!(
+            "{}",
+            t!(
+                "status.last_pull",
+                when = at
+                    .to_zoned(jiff::tz::TimeZone::system())
+                    .strftime("%Y-%m-%d %H:%M")
+            )
         ),
-        None => println!("Dernier pull : jamais"),
+        None => println!("{}", t!("status.never_pulled")),
     }
     let items = app.db.list_items().await?;
     let count = |s| items.iter().filter(|i| i.status == s).count();
     println!(
-        "Enregistrements : {} (en cours : {}, en échec : {})",
-        items.len(),
-        count(RecordingStatus::Processing),
-        count(RecordingStatus::Failed)
+        "{}",
+        t!(
+            "status.recordings",
+            total = items.len(),
+            processing = count(RecordingStatus::Processing),
+            failed = count(RecordingStatus::Failed)
+        )
     );
     Ok(ExitCode::SUCCESS)
 }

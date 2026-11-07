@@ -1,6 +1,8 @@
 //! `<LIBERARR_HOME>/.env` is the one source of secrets and settings (only `LIBERARR_HOME`, which
 //! locates it, comes from the environment). Errors name the variable, never its value.
 use liberarr_core::ai::{Provider, Step, capability, supports};
+use liberarr_core::lang::Language;
+use rust_i18n::t;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -23,6 +25,8 @@ pub struct Config {
     pub transcribe: Profile,
     pub llm: Profile,
     pub obsidian: PathBuf,
+    /// Language of the summary and of the note headings.
+    pub content_language: Language,
     /// Set the `Secure` cookie flag (serving behind HTTPS).
     pub cookie_secure: bool,
 }
@@ -34,7 +38,7 @@ pub fn home() -> Result<PathBuf, String> {
     }
     std::env::var_os("HOME")
         .map(|h| PathBuf::from(h).join(".liberarr"))
-        .ok_or_else(|| "HOME n'est pas défini : définissez LIBERARR_HOME".into())
+        .ok_or_else(|| t!("home.not_set").into_owned())
 }
 
 /// `KEY=VALUE` lines; blank lines and `#` comments are skipped, surrounding quotes removed.
@@ -65,30 +69,28 @@ pub fn load(home: &Path) -> Result<Config, String> {
     let file = match std::fs::read_to_string(home.join(".env")) {
         Ok(t) => parse_env(&t),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Err(format!(
-                "{} introuvable : lancez d'abord `liberarr init`",
-                home.join(".env").display()
-            ));
+            return Err(t!("config.env_missing", path = home.join(".env").display()).into_owned());
         }
-        Err(e) => return Err(format!("impossible de lire le fichier .env : {}", e.kind())),
+        Err(e) => return Err(t!("config.env_unreadable", kind = e.kind()).into_owned()),
     };
-    load_from(home, |k| file.get(k).cloned())
+    load_from(home, crate::i18n::ui_language(home), |k| {
+        file.get(k).cloned()
+    })
 }
 
-fn load_from(home: &Path, get: impl Fn(&str) -> Option<String>) -> Result<Config, String> {
+fn load_from(
+    home: &Path,
+    ui: Language,
+    get: impl Fn(&str) -> Option<String>,
+) -> Result<Config, String> {
     let need = |k: &str| match get(k) {
         Some(v) if !is_unset(&v) => Ok(v.trim().to_string()),
-        _ => Err(format!(
-            "{k} est absent, vide ou encore un exemple dans {}/.env : lancez `liberarr init`",
-            home.display()
-        )),
+        _ => Err(t!("config.var_unset", var = k, home = home.display()).into_owned()),
     };
     let secret = |k: &str| {
         let v = need(k)?;
         if v.chars().count() < MIN_SECRET {
-            return Err(format!(
-                "{k} est trop court (au moins {MIN_SECRET} caractères) : supprimez la ligne et relancez `liberarr init`"
-            ));
+            return Err(t!("config.secret_too_short", var = k, min = MIN_SECRET).into_owned());
         }
         Ok(v)
     };
@@ -96,17 +98,16 @@ fn load_from(home: &Path, get: impl Fn(&str) -> Option<String>) -> Result<Config
         let var = format!("LIBERARR_{p}_PROVIDER");
         let provider = match get(&var).filter(|v| !v.trim().is_empty()) {
             None => Provider::Compatible,
-            Some(v) => Provider::parse(v.trim()).ok_or_else(|| {
-                format!("{var} n'est pas reconnu (openai-compatible, openai, mistral, anthropic, claude)")
-            })?,
+            Some(v) => Provider::parse(v.trim())
+                .ok_or_else(|| t!("config.provider_unknown", var = var).into_owned())?,
         };
         let model = need(&format!("LIBERARR_{p}_MODEL"))?;
         if !supports(capability(provider, &model), step) {
-            let verb = match step {
-                Step::Transcribe => "transcrire",
-                Step::Summarize => "résumer",
-            };
-            return Err(format!("{var} : ce fournisseur ne sait pas {verb}"));
+            return Err(match step {
+                Step::Transcribe => t!("config.cannot_transcribe", var = var),
+                Step::Summarize => t!("config.cannot_summarize", var = var),
+            }
+            .into_owned());
         }
         // The claude CLI uses its own login: no URL, no key.
         let (base_url, api_key) = if provider == Provider::Claude {
@@ -124,6 +125,11 @@ fn load_from(home: &Path, get: impl Fn(&str) -> Option<String>) -> Result<Config
             model,
         })
     };
+    let content_language = match get("LIBERARR_CONTENT_LANGUAGE").filter(|v| !v.trim().is_empty()) {
+        None => ui,
+        Some(v) => Language::parse(v.trim())
+            .ok_or_else(|| t!("config.content_language_unknown").into_owned())?,
+    };
     Ok(Config {
         home: home.to_path_buf(),
         secret_key: secret("LIBERARR_SECRET_KEY")?,
@@ -134,6 +140,7 @@ fn load_from(home: &Path, get: impl Fn(&str) -> Option<String>) -> Result<Config
         obsidian: get("LIBERARR_OBSIDIAN_DIR")
             .filter(|v| !is_unset(v))
             .map_or_else(|| home.join("obsidian"), PathBuf::from),
+        content_language,
         cookie_secure: get("LIBERARR_COOKIE_SECURE").is_some_and(|v| v.trim() == "true"),
     })
 }
@@ -155,7 +162,7 @@ LIBERARR_LLM_MODEL=gpt
 
     fn load_text(text: &str) -> Result<Config, String> {
         let vars = parse_env(text);
-        load_from(Path::new("/h"), |k| vars.get(k).cloned())
+        load_from(Path::new("/h"), Language::En, |k| vars.get(k).cloned())
     }
 
     fn with(key: &str, value: &str) -> String {

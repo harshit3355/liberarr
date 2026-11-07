@@ -6,6 +6,7 @@ use crate::container::keys;
 use liberarr_core::device::link::{LinkDevice, Unlock};
 use liberarr_infra::ble::{BtleConnector, BtleScanner, default_adapter};
 use liberarr_infra::plaud_cloud::PlaudCloud;
+use rust_i18n::t;
 use std::process::ExitCode;
 
 /// The web app's token is often copied with its `Bearer ` prefix.
@@ -17,17 +18,17 @@ fn bare_token(pasted: &str) -> &str {
 }
 
 pub async fn run(cfg: &Config, force: bool) -> Outcome {
-    let pasted = ask("Token Plaud (saisie masquée) : ", true)?;
+    let pasted = ask(&t!("link.token_prompt"), true)?;
     let token = bare_token(&pasted);
     if token.is_empty() {
-        return Err("aucun token saisi".into());
+        return Err(t!("link.no_token").into_owned().into());
     }
     let adapter = default_adapter().await?;
     let (scanner, connector) = (
         BtleScanner::new(adapter.clone()),
         BtleConnector::new(adapter),
     );
-    eprintln!("Récupération des clés, puis recherche de l'appareil (environ 12 s)…");
+    eprintln!("{}", t!("link.fetching"));
     let report = LinkDevice {
         account: &PlaudCloud::new(),
         keys: &keys(cfg),
@@ -37,29 +38,24 @@ pub async fn run(cfg: &Config, force: bool) -> Outcome {
     .run(token, force)
     .await?;
     println!(
-        "Clés enregistrées pour {} appareil(s){}.",
-        report.devices,
+        "{}",
         if report.key_pair_fetched {
-            " (nouvelle paire de clés)"
+            t!("link.keys_saved_new_pair", devices = report.devices)
         } else {
-            ""
+            t!("link.keys_saved", devices = report.devices)
         }
     );
     match report.unlock {
         Unlock::Ok => {
-            println!("Test de déverrouillage réussi. Lancez `liberarr pull`.");
+            println!("{}", t!("link.unlock_ok"));
             Ok(ExitCode::SUCCESS)
         }
         Unlock::NotSeen => {
-            println!(
-                "Aucun appareil détecté pour le test : réveillez-le, fermez l'app Plaud sur le téléphone, puis relancez `liberarr link`."
-            );
+            println!("{}", t!("link.not_seen"));
             Ok(ExitCode::from(2))
         }
         Unlock::Failed(why) => {
-            println!(
-                "Échec du test de déverrouillage : {why}. Fermez l'app Plaud sur le téléphone et réessayez."
-            );
+            println!("{}", t!("link.unlock_failed", why = why));
             Ok(ExitCode::FAILURE)
         }
     }

@@ -1,6 +1,8 @@
 import { useEffect, useId, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 export function Mindmap({ code }: { code: string }) {
+  const { t } = useTranslation()
   const id = `mm-${useId().replace(/[^a-zA-Z0-9]/g, '')}`
   const [svg, setSvg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -25,7 +27,7 @@ export function Mindmap({ code }: { code: string }) {
     return (
       <div className="space-y-2">
         <p role="alert" className="text-sm text-amber-400">
-          Carte mentale illisible : {error}
+          {t('summaries.mindmapError', { error })}
         </p>
         <pre className="overflow-x-auto rounded bg-zinc-900 p-3 text-xs">{code}</pre>
       </div>

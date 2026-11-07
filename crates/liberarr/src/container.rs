@@ -157,6 +157,7 @@ impl StepHandler for App {
                 transcripts: &self.db,
                 llm: &self.llm,
                 summaries: &self.db,
+                lang: self.cfg.content_language,
             }
             .run(id)
             .await
@@ -168,6 +169,7 @@ impl StepHandler for App {
                 notes: &FsNoteStore,
                 vault: self.cfg.obsidian.clone(),
                 tz: jiff::tz::TimeZone::system(),
+                lang: self.cfg.content_language,
             }
             .run(id)
             .await

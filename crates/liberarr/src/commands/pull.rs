@@ -7,6 +7,7 @@ use liberarr_core::device::protocol::Advert;
 use liberarr_core::device::pull::PullRecordings;
 use liberarr_core::jobs::JobQueue;
 use liberarr_infra::ble::{BtleConnector, BtleScanner, default_adapter};
+use rust_i18n::t;
 use std::io::Write;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
@@ -60,12 +61,15 @@ impl<S: DeviceSession> DeviceSession for ProgressSession<S> {
                     let left = total.saturating_sub(u64::from(start) + got) as f64;
                     let eta = (left / speed.max(1.0)) as u64;
                     eprint!(
-                        "\r  {label} : {:.1}/{:.1} Mo, {:.0} Ko/s, reste {}:{:02}   ",
-                        mb(u64::from(start) + got),
-                        mb(total),
-                        speed / 1000.0,
-                        eta / 60,
-                        eta % 60
+                        "\r{}",
+                        t!(
+                            "pull.progress",
+                            label = label,
+                            done = format!("{:.1}", mb(u64::from(start) + got)),
+                            total = format!("{:.1}", mb(total)),
+                            speed = format!("{:.0}", speed / 1000.0),
+                            eta = format!("{}:{:02}", eta / 60, eta % 60)
+                        )
                     );
                     let _ = std::io::stderr().flush();
                 }
@@ -84,12 +88,12 @@ pub async fn run(app: &App, no_process: bool) -> Outcome {
     }
     let keys = keys(&app.cfg);
     if keys.load()?.is_empty() {
-        eprintln!("Aucun appareil lié : lancez d'abord `liberarr link`.");
+        eprintln!("{}", t!("pull.no_device_linked"));
         return Ok(ExitCode::from(2));
     }
     let adapter = default_adapter().await?;
     let connector = Progress(BtleConnector::new(adapter.clone()));
-    eprintln!("Recherche de l'appareil (environ 12 s)…");
+    eprintln!("{}", t!("pull.searching"));
     let report = PullRecordings {
         scanner: &BtleScanner::new(adapter),
         connector: &connector,
@@ -103,26 +107,26 @@ pub async fn run(app: &App, no_process: bool) -> Outcome {
     .await?;
 
     if report.no_device {
-        eprintln!(
-            "Aucun appareil Plaud connu à portée. Réveillez l'appareil (appui sur un bouton), \
-             fermez l'app Plaud sur le téléphone, puis relancez `liberarr pull`. \
-             Si l'appareil n'a jamais été lié : `liberarr link`."
-        );
+        eprintln!("{}", t!("pull.no_device_in_range"));
         return Ok(ExitCode::from(2));
     }
     println!(
-        "{} nouvel(s) enregistrement(s), {} en cours d'enregistrement ignoré(s), {} échec(s).",
-        report.pulled.len(),
-        report.skipped_recording.len(),
-        report.failed.len()
+        "{}",
+        t!(
+            "pull.summary",
+            pulled = report.pulled.len(),
+            skipped = report.skipped_recording.len(),
+            failed = report.failed.len()
+        )
     );
     for (session, why) in &report.failed {
-        println!("  session {session} : {why} (sera reprise au prochain pull)");
+        println!(
+            "{}",
+            t!("pull.failed_session", session = session, why = why)
+        );
     }
     for (tail, why) in &report.device_errors {
-        println!(
-            "  appareil …{tail} : {why}. Réveillez-le et fermez l'app Plaud sur le téléphone."
-        );
+        println!("{}", t!("pull.device_error", tail = tail, why = why));
     }
     let mut ok = report.failed.is_empty() && report.device_errors.is_empty();
     if !no_process {

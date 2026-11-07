@@ -4,12 +4,13 @@ use super::{Outcome, ask};
 use crate::config::{self, is_unset, parse_env};
 use crate::providers;
 use liberarr_core::ai::{Provider, Step, capability, supports};
+use rust_i18n::t;
 use std::io::Write;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::process::ExitCode;
 
 /// Per step: the step, the variables (provider, base URL, API key, model) and the questions
-/// (provider, base URL, API key, model).
+/// (provider, base URL, API key, model): catalog keys.
 type StepPrompts = (Step, [&'static str; 4], [&'static str; 4]);
 
 const STEPS: [StepPrompts; 2] = [
@@ -22,10 +23,10 @@ const STEPS: [StepPrompts; 2] = [
             "LIBERARR_TRANSCRIBE_MODEL",
         ],
         [
-            "Fournisseur de transcription",
-            "URL du service de transcription",
-            "Clé API de transcription",
-            "Modèle de transcription",
+            "init.transcribe.provider",
+            "init.transcribe.url",
+            "init.transcribe.key",
+            "init.transcribe.model",
         ],
     ),
     (
@@ -37,32 +38,32 @@ const STEPS: [StepPrompts; 2] = [
             "LIBERARR_LLM_MODEL",
         ],
         [
-            "Fournisseur du résumé (LLM)",
-            "URL du service de résumé (LLM)",
-            "Clé API du LLM",
-            "Modèle du LLM",
+            "init.summarize.provider",
+            "init.summarize.url",
+            "init.summarize.key",
+            "init.summarize.model",
         ],
     ),
 ];
 
 fn random_hex(bytes: usize) -> Result<String, String> {
     let mut buf = vec![0u8; bytes];
-    getrandom::fill(&mut buf).map_err(|_| "aléa système indisponible".to_string())?;
+    getrandom::fill(&mut buf).map_err(|_| t!("init.random_unavailable").into_owned())?;
     Ok(buf.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// Asks until a non-empty answer (or the default) is given.
 fn prompt(question: &str, default: Option<&str>, hidden: bool) -> std::io::Result<String> {
     let label = match default {
-        Some(d) => format!("{question} [{d}] : "),
-        None => format!("{question} : "),
+        Some(d) => t!("init.prompt_default", question = question, default = d),
+        None => t!("init.prompt", question = question),
     };
     loop {
         let v = ask(&label, hidden)?;
         match (v.is_empty(), default) {
             (false, _) => return Ok(v),
             (true, Some(d)) => return Ok(d.to_string()),
-            (true, None) => eprintln!("Une valeur est requise."),
+            (true, None) => eprintln!("{}", t!("init.value_required")),
         }
     }
 }
@@ -71,11 +72,11 @@ fn prompt(question: &str, default: Option<&str>, hidden: bool) -> std::io::Resul
 /// capability warning with the default model.
 fn ask_provider(question: &str, step: Step) -> std::io::Result<Provider> {
     loop {
-        let label = format!("{question} (openai, openai-compatible, mistral, anthropic, claude)");
+        let label = t!("init.provider_label", question = question);
         let v = prompt(&label, Some("openai"), false)?;
         match Provider::parse(v.trim()) {
             Some(p) if supports(capability(p, ""), step) => return Ok(p),
-            _ => eprintln!("Fournisseur inconnu, ou qui ne sait pas faire cette étape."),
+            _ => eprintln!("{}", t!("init.provider_unknown")),
         }
     }
 }
@@ -134,7 +135,11 @@ pub fn run() -> Outcome {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => {
-            return Err(format!("impossible de lire {} : {}", path.display(), e.kind()).into());
+            return Err(
+                t!("init.cannot_read", path = path.display(), kind = e.kind())
+                    .into_owned()
+                    .into(),
+            );
         }
     };
     let current = parse_env(&existing);
@@ -159,11 +164,9 @@ pub fn run() -> Outcome {
         // Asked only when neither the provider nor the base URL is set: never overwrites a choice.
         let provider = if missing(provider_var) && missing(url_var) {
             if step == Step::Summarize && claude_connected() {
-                println!(
-                    "Claude détecté et connecté : le fournisseur « claude » utilise ton abonnement via la CLI officielle. Usage toléré mais non garanti par Anthropic ; la clé API (« anthropic ») est recommandée. Tes transcriptions sont envoyées à Anthropic selon les réglages de confidentialité de ton compte."
-                );
+                println!("{}", t!("init.claude_detected"));
             }
-            let p = ask_provider(provider_q, step)?;
+            let p = ask_provider(&t!(provider_q), step)?;
             updates.push((provider_var, p.as_str().to_string()));
             p
         } else {
@@ -176,22 +179,22 @@ pub fn run() -> Outcome {
         // The claude CLI has its own login: no URL, no key.
         let needs_api = provider != Provider::Claude;
         if needs_api && missing(url_var) {
-            updates.push((url_var, prompt(url_q, default_url, false)?));
+            updates.push((url_var, prompt(&t!(url_q), default_url, false)?));
         }
         if needs_api && missing(key_var) {
-            updates.push((key_var, prompt(key_q, None, true)?));
+            updates.push((key_var, prompt(&t!(key_q), None, true)?));
         }
         if missing(model_var) {
-            let model = prompt(model_q, default_model, false)?;
+            let model = prompt(&t!(model_q), default_model, false)?;
             if let Some(w) = providers::warning(capability(provider, &model), step) {
-                println!("Attention : {w}.");
+                println!("{}", t!("init.attention", warning = w));
             }
             updates.push((model_var, model));
         }
     }
     if updates.is_empty() {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-        println!("{} est déjà complet : rien à changer.", path.display());
+        println!("{}", t!("init.already_complete", path = path.display()));
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -207,11 +210,11 @@ pub fn run() -> Outcome {
     f.sync_all()?;
     std::fs::rename(&tmp, &path)?;
 
-    println!("Configuration enregistrée dans {}.", path.display());
+    println!("{}", t!("init.saved", path = path.display()));
     if let Some(p) = password {
-        println!("Connexion à l'interface : identifiant « admin », mot de passe : {p}");
-        println!("(affiché une seule fois ; il reste dans .env sous LIBERARR_ADMIN_PASSWORD)");
+        println!("{}", t!("init.login", password = p));
+        println!("{}", t!("init.login_note"));
     }
-    println!("Étape suivante : `liberarr link`, puis `liberarr pull`.");
+    println!("{}", t!("init.next_steps"));
     Ok(ExitCode::SUCCESS)
 }

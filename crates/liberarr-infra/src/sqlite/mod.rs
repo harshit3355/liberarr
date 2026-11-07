@@ -199,6 +199,7 @@ mod tests {
                     notes: &FsNoteStore,
                     vault,
                     tz: jiff::tz::TimeZone::UTC,
+                    lang: liberarr_core::lang::Language::Fr,
                 }
                 .run(id)
                 .await

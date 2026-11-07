@@ -10,6 +10,7 @@ pub mod device;
 pub mod error;
 pub mod exports;
 pub mod jobs;
+pub mod lang;
 pub mod recordings;
 pub mod summaries;
 pub mod transcription;

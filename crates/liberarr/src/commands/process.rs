@@ -3,6 +3,7 @@ use super::{Outcome, process_and_report};
 use crate::container::App;
 use liberarr_core::jobs::JobQueue;
 use liberarr_core::recordings::Source;
+use rust_i18n::t;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -14,11 +15,11 @@ pub async fn run(app: &App, files: &[PathBuf]) -> Outcome {
         let title = f.file_stem().map(|s| s.to_string_lossy().into_owned());
         match app.ingest().run(f, Source::File, title, None).await {
             Ok((id, true)) => {
-                println!("{} → #{id}", f.display());
+                println!("{}", t!("process.ingested", file = f.display(), id = id));
                 ids.push(id);
             }
             Ok((id, false)) => {
-                println!("{} → #{id} (déjà connu)", f.display());
+                println!("{}", t!("process.known", file = f.display(), id = id));
                 ids.push(id);
             }
             Err(e) => {

@@ -83,7 +83,7 @@ pub fn verify_ogg(data: &[u8]) -> Result<(), OggError> {
     Ok(())
 }
 
-const NON_OGG_TOO_BIG: &str = "Fichier non-Ogg > 25 Mo : non pris en charge en v2";
+const NON_OGG_TOO_BIG: &str = "Non-Ogg file above 25 MB: not supported in v2";
 
 /// Pages of a stream already checked by `verify_ogg`.
 fn pages(mut rest: &[u8]) -> Vec<&[u8]> {
@@ -130,7 +130,7 @@ pub fn split_ogg(data: &[u8], max_bytes: usize) -> Result<Vec<(Vec<u8>, f64)>> {
     if !data.starts_with(b"OggS") {
         return Err(Error::Unsupported(NON_OGG_TOO_BIG.into()));
     }
-    let bad = |why: &str| Error::Unsupported(format!("Ogg Opus non pris en charge : {why}"));
+    let bad = |why: &str| Error::Unsupported(format!("Unsupported Ogg Opus file: {why}"));
     verify_ogg(data).map_err(|e| bad(&e.to_string()))?;
     // Plaud files interleave a second `PLAUD.AI` stream: keep only the Opus one.
     let all = pages(data);
@@ -143,7 +143,7 @@ pub fn split_ogg(data: &[u8], max_bytes: usize) -> Result<Vec<(Vec<u8>, f64)>> {
         .filter(|p| opus.as_deref().is_none_or(|s| &p[14..18] == s))
         .collect();
     let [head, tags, rest @ ..] = &all[..] else {
-        return Err(bad("en-têtes absents"));
+        return Err(bad("missing headers"));
     };
     let body = |p: &[u8]| p[27 + p[26] as usize..].to_vec();
     let (head_body, tags_body) = (body(head), body(tags));
@@ -151,7 +151,7 @@ pub fn split_ogg(data: &[u8], max_bytes: usize) -> Result<Vec<(Vec<u8>, f64)>> {
         || head_body.len() < 12
         || !tags_body.starts_with(b"OpusTags")
     {
-        return Err(bad("ce n'est pas de l'Opus"));
+        return Err(bad("not Opus audio"));
     }
     let pre_skip = i64::from(u16::from_le_bytes([head_body[10], head_body[11]]));
     let seconds = |g: i64| (g - pre_skip).max(0) as f64 / 48_000.0;
@@ -162,12 +162,12 @@ pub fn split_ogg(data: &[u8], max_bytes: usize) -> Result<Vec<(Vec<u8>, f64)>> {
     let (mut start, mut prev) = (0.0, Some(pre_skip));
     for p in rest {
         if header_len + p.len() > max_bytes {
-            return Err(bad("une page dépasse la taille maximale"));
+            return Err(bad("a page exceeds the maximum size"));
         }
         if cur_len + p.len() > max_bytes {
             // A part may only start on a fresh packet whose start position is known.
             let (true, Some(g)) = (p[5] & 1 == 0, prev) else {
-                return Err(bad("pas de point de coupure"));
+                return Err(bad("no valid cut point"));
             };
             parts.push((build_part(&headers, &cur), start));
             (cur, cur_len, start) = (Vec::new(), header_len, seconds(g));
@@ -335,7 +335,7 @@ pub(crate) mod tests {
         let err = split_ogg(&junk, 99).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Fichier non-Ogg > 25 Mo : non pris en charge en v2"
+            "Non-Ogg file above 25 MB: not supported in v2"
         );
     }
 }

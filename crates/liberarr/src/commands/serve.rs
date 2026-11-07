@@ -3,6 +3,7 @@ use super::Outcome;
 use crate::container::App;
 use liberarr_core::jobs::{JobQueue, run_job_once};
 use liberarr_web::{AppState, Auth, AuthConfig, router};
+use rust_i18n::t;
 use std::net::{IpAddr, SocketAddr};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -14,7 +15,7 @@ pub async fn run(app: App, host: IpAddr, port: u16) -> Outcome {
     // Once, before the worker claims anything.
     let requeued = app.db.reset_stale().await?;
     if requeued > 0 {
-        eprintln!("{requeued} tâche(s) interrompue(s) remise(s) en file.");
+        eprintln!("{}", t!("serve.requeued", count = requeued));
     }
     let app = Arc::new(app);
     let worker = Arc::clone(&app);
@@ -24,7 +25,7 @@ pub async fn run(app: App, host: IpAddr, port: u16) -> Outcome {
                 Ok(true) => {}
                 Ok(false) => tokio::time::sleep(IDLE).await,
                 Err(e) => {
-                    eprintln!("worker : {e}");
+                    eprintln!("{}", t!("serve.worker_error", error = e));
                     tokio::time::sleep(IDLE).await;
                 }
             }
@@ -42,9 +43,9 @@ pub async fn run(app: App, host: IpAddr, port: u16) -> Outcome {
         auth: Arc::new(Auth::new(auth)),
     };
     let listener = tokio::net::TcpListener::bind((host, port)).await?;
-    println!("Liberarr : http://{}", listener.local_addr()?);
+    println!("{}", t!("serve.listening", addr = listener.local_addr()?));
     if !host.is_loopback() {
-        println!("Attention : l'interface est accessible depuis le réseau.");
+        println!("{}", t!("serve.network_warning"));
     }
     axum::serve(
         listener,

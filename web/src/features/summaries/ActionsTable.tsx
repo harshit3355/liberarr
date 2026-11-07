@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { formatTimestamp } from '../../shared/time'
 import { useToggleAction, type Action } from '../recordings/api'
 
@@ -8,24 +9,25 @@ interface Props {
 }
 
 export function ActionsTable({ recordingId, actions, onSeek }: Props) {
+  const { t } = useTranslation()
   const toggle = useToggleAction(recordingId)
 
-  if (!actions.length) return <p className="text-sm text-zinc-400">Aucune action.</p>
+  if (!actions.length) return <p className="text-sm text-zinc-400">{t('summaries.actions.none')}</p>
   return (
     <div className="overflow-x-auto">
       {toggle.isError && (
         <p role="alert" className="mb-2 text-sm text-red-400">
-          Impossible de mettre à jour l'action.
+          {t('summaries.actions.updateError')}
         </p>
       )}
       <table className="w-full text-sm">
         <thead className="text-left text-zinc-300">
           <tr>
-            <th className="p-2">Fait</th>
-            <th className="p-2">Action</th>
-            <th className="p-2">Responsable</th>
-            <th className="p-2">Échéance</th>
-            <th className="p-2">Moment</th>
+            <th className="p-2">{t('summaries.actions.done')}</th>
+            <th className="p-2">{t('summaries.actions.action')}</th>
+            <th className="p-2">{t('summaries.actions.owner')}</th>
+            <th className="p-2">{t('summaries.actions.due')}</th>
+            <th className="p-2">{t('summaries.actions.moment')}</th>
           </tr>
         </thead>
         <tbody>
@@ -34,7 +36,7 @@ export function ActionsTable({ recordingId, actions, onSeek }: Props) {
               <td className="p-2">
                 <input
                   type="checkbox"
-                  aria-label={`Marquer « ${a.action} » comme faite`}
+                  aria-label={t('summaries.actions.markDone', { action: a.action })}
                   checked={a.done}
                   onChange={(e) => toggle.mutate({ index, done: e.target.checked })}
                 />

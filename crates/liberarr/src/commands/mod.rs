@@ -1,4 +1,4 @@
-//! One module per CLI command. Output is for the owner, in French; it never shows a token, a key,
+//! One module per CLI command. Output is for the owner, translated (`locales/`); it never shows a token, a key,
 //! a full serial, a transcript or a summary.
 pub mod init;
 pub mod link;
@@ -9,6 +9,7 @@ pub mod status;
 
 use crate::container::App;
 use liberarr_core::jobs::{JobQueue, JobStatus};
+use rust_i18n::t;
 use std::io::{BufRead, IsTerminal, Write};
 
 pub type Outcome = Result<std::process::ExitCode, Box<dyn std::error::Error>>;
@@ -24,7 +25,7 @@ pub fn ask(prompt: &str, hidden: bool) -> std::io::Result<String> {
         if std::io::stdin().lock().read_line(&mut line)? == 0 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
-                "entrée fermée",
+                t!("ask.input_closed").into_owned(),
             ));
         }
         line
@@ -35,7 +36,7 @@ pub fn ask(prompt: &str, hidden: bool) -> std::io::Result<String> {
 /// Runs the queue to the end (also work left by an earlier `pull --no-process`), then prints
 /// where each of `ids` stands. `false` if one failed.
 pub async fn process_and_report(app: &App, ids: &[i64]) -> Result<bool, liberarr_core::Error> {
-    eprintln!("Traitement (transcription, résumé, export)…");
+    eprintln!("{}", t!("process.running"));
     app.drain().await?;
     if ids.is_empty() {
         return Ok(true);
@@ -46,19 +47,26 @@ pub async fn process_and_report(app: &App, ids: &[i64]) -> Result<bool, liberarr
             Some(j) if j.status == JobStatus::Failed => {
                 ok = false;
                 println!(
-                    "  #{id} : échec à l'étape {} — {}",
-                    j.step,
-                    j.error.as_deref().unwrap_or("?")
+                    "{}",
+                    t!(
+                        "process.failed_step",
+                        id = id,
+                        step = j.step,
+                        error = j.error.as_deref().unwrap_or("?")
+                    )
                 );
             }
-            Some(j) if j.status == JobStatus::Done => println!("  #{id} : terminé"),
-            _ => println!("  #{id} : en attente"),
+            Some(j) if j.status == JobStatus::Done => println!("{}", t!("process.done", id = id)),
+            _ => println!("{}", t!("process.waiting", id = id)),
         }
     }
     if ok {
-        println!("Notes Obsidian : {}", app.cfg.obsidian.display());
+        println!(
+            "{}",
+            t!("process.notes_dir", path = app.cfg.obsidian.display())
+        );
     } else {
-        println!("Relancez l'étape en échec depuis l'interface (`liberarr serve`).");
+        println!("{}", t!("process.retry_hint"));
     }
     Ok(ok)
 }

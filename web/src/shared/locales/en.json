@@ -1,0 +1,59 @@
+{
+  "common": {
+    "loading": "Loading…"
+  },
+  "auth": {
+    "username": "Username",
+    "password": "Password",
+    "signIn": "Sign in",
+    "signOut": "Sign out",
+    "errors": {
+      "invalidCredentials": "Invalid credentials.",
+      "tooManyAttempts": "Too many attempts. Try again in a few minutes.",
+      "generic": "Unable to sign in. Try again."
+    }
+  },
+  "recordings": {
+    "title": "Recordings",
+    "back": "← Recordings",
+    "untitled": "Recording {{id}}",
+    "empty": "No recordings yet.",
+    "loadError": "Unable to load the recordings.",
+    "notFound": "Recording not found.",
+    "processing": "Processing…",
+    "stepFailed": "Step “{{step}}” failed.",
+    "stepFailedWithError": "Step “{{step}}” failed: {{error}}",
+    "retry": "Retry",
+    "retryError": "Unable to retry the step.",
+    "status": {
+      "processing": "In progress",
+      "failed": "Failed",
+      "done": "Ready"
+    },
+    "steps": {
+      "transcribe": "transcription",
+      "summarize": "summary",
+      "export": "export"
+    }
+  },
+  "summaries": {
+    "summary": "Summary",
+    "mindmap": "Mind map",
+    "mindmapError": "Unreadable mind map: {{error}}",
+    "actions": {
+      "title": "Actions",
+      "none": "No actions.",
+      "updateError": "Unable to update the action.",
+      "markDone": "Mark “{{action}}” as done",
+      "done": "Done",
+      "action": "Action",
+      "owner": "Owner",
+      "due": "Due",
+      "moment": "Time"
+    }
+  },
+  "transcription": {
+    "title": "Transcript",
+    "noTimestamps": "This provider does not return timestamps"
+  }
+}

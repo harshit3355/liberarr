@@ -1,4 +1,5 @@
 //! Exports context: one-way Obsidian note rendering and marker-bounded upsert.
+use crate::lang::Language;
 use crate::recordings::{Recording, RecordingRepo};
 use crate::summaries::{MeetingSummary, SummaryRepo};
 use crate::transcription::{Transcript, TranscriptRepo, timestamp};
@@ -51,7 +52,8 @@ pub fn frontmatter(r: &Recording, tz: &TimeZone) -> String {
     )
 }
 
-pub fn render_block(t: &Transcript, s: &MeetingSummary) -> String {
+pub fn render_block(t: &Transcript, s: &MeetingSummary, lang: Language) -> String {
+    let l = lang.note_labels();
     let actions: Vec<String> = s
         .actions
         .iter()
@@ -81,22 +83,22 @@ pub fn render_block(t: &Transcript, s: &MeetingSummary) -> String {
     };
     let mut lines = vec![
         START.to_string(),
-        "## Résumé".into(),
+        format!("## {}", l.summary),
         s.summary_md.trim().into(),
         String::new(),
-        "## Carte mentale".into(),
+        format!("## {}", l.mindmap),
         "```mermaid".into(),
         s.mindmap.trim().into(),
         "```".into(),
         String::new(),
-        "## Actions".into(),
+        format!("## {}", l.actions),
     ];
     lines.extend(if actions.is_empty() {
-        vec!["_Aucune action._".to_string()]
+        vec![format!("_{}_", l.no_actions)]
     } else {
         actions
     });
-    lines.extend([String::new(), "## Transcription".into()]);
+    lines.extend([String::new(), format!("## {}", l.transcript)]);
     lines.extend(transcript);
     lines.push(END.into());
     lines.join("\n")
@@ -137,6 +139,7 @@ pub struct ExportToObsidian<'a, R, T, S, N> {
     pub notes: &'a N,
     pub vault: PathBuf,
     pub tz: TimeZone,
+    pub lang: Language,
 }
 
 impl<R: RecordingRepo, T: TranscriptRepo, S: SummaryRepo, N: NoteStore>
@@ -182,7 +185,7 @@ impl<R: RecordingRepo, T: TranscriptRepo, S: SummaryRepo, N: NoteStore>
         };
         let text = upsert_block(
             self.notes.read(&path)?.as_deref(),
-            &render_block(&t, &s),
+            &render_block(&t, &s, self.lang),
             &frontmatter(&rec, &self.tz),
         );
         self.notes.write_atomic(&path, &text)?;
@@ -341,6 +344,7 @@ mod tests {
             notes: &notes,
             vault: "/vault".into(),
             tz: TimeZone::UTC,
+            lang: Language::Fr,
         };
         let a = block_on(uc.run(1)).unwrap();
         let b = block_on(uc.run(2)).unwrap();

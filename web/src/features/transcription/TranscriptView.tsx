@@ -1,4 +1,5 @@
 import { memo, useEffect, useState, type RefObject } from 'react'
+import { useTranslation } from 'react-i18next'
 import { formatTimestamp } from '../../shared/time'
 import type { Segment, Transcript } from '../recordings/api'
 
@@ -25,6 +26,7 @@ const Row = memo(function Row({ s, active, onSeek }: { s: Segment; active: boole
 })
 
 export function TranscriptView({ transcript, audio, onSeek }: Props) {
+  const { t } = useTranslation()
   // The playback time lives here, not in the page, so the summary and mind map never re-render on it.
   const [time, setTime] = useState(0)
   useEffect(() => {
@@ -38,7 +40,7 @@ export function TranscriptView({ transcript, audio, onSeek }: Props) {
   if (!transcript.has_timestamps)
     return (
       <div className="space-y-3">
-        <p className="text-sm text-zinc-400">Ce fournisseur ne renvoie pas d'horodatage</p>
+        <p className="text-sm text-zinc-400">{t('transcription.noTimestamps')}</p>
         <p className="whitespace-pre-wrap">{transcript.text}</p>
       </div>
     )

@@ -1,0 +1,59 @@
+{
+  "common": {
+    "loading": "Chargement…"
+  },
+  "auth": {
+    "username": "Identifiant",
+    "password": "Mot de passe",
+    "signIn": "Se connecter",
+    "signOut": "Se déconnecter",
+    "errors": {
+      "invalidCredentials": "Identifiants invalides.",
+      "tooManyAttempts": "Trop de tentatives. Réessayez dans quelques minutes.",
+      "generic": "Connexion impossible. Réessayez."
+    }
+  },
+  "recordings": {
+    "title": "Enregistrements",
+    "back": "← Enregistrements",
+    "untitled": "Enregistrement {{id}}",
+    "empty": "Aucun enregistrement pour le moment.",
+    "loadError": "Impossible de charger les enregistrements.",
+    "notFound": "Enregistrement introuvable.",
+    "processing": "Traitement en cours…",
+    "stepFailed": "Échec de l'étape « {{step}} ».",
+    "stepFailedWithError": "Échec de l'étape « {{step}} » : {{error}}",
+    "retry": "Relancer",
+    "retryError": "Impossible de relancer l'étape.",
+    "status": {
+      "processing": "En cours",
+      "failed": "Échec",
+      "done": "Prêt"
+    },
+    "steps": {
+      "transcribe": "transcription",
+      "summarize": "résumé",
+      "export": "export"
+    }
+  },
+  "summaries": {
+    "summary": "Résumé",
+    "mindmap": "Carte mentale",
+    "mindmapError": "Carte mentale illisible : {{error}}",
+    "actions": {
+      "title": "Actions",
+      "none": "Aucune action.",
+      "updateError": "Impossible de mettre à jour l'action.",
+      "markDone": "Marquer « {{action}} » comme faite",
+      "done": "Fait",
+      "action": "Action",
+      "owner": "Responsable",
+      "due": "Échéance",
+      "moment": "Moment"
+    }
+  },
+  "transcription": {
+    "title": "Transcription",
+    "noTimestamps": "Ce fournisseur ne renvoie pas d'horodatage"
+  }
+}

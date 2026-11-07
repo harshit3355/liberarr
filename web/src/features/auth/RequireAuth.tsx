@@ -1,12 +1,14 @@
+import { useTranslation } from 'react-i18next'
 import { Link, Navigate, Outlet } from 'react-router'
 import { useLogout, useMe } from './api'
 
 /** Gate and shell for every page except login. */
 export function RequireAuth() {
+  const { t } = useTranslation()
   const me = useMe()
   const logout = useLogout()
 
-  if (me.isLoading) return <p className="p-8 text-zinc-400">Chargement…</p>
+  if (me.isLoading) return <p className="p-8 text-zinc-400">{t('common.loading')}</p>
   if (!me.data) return <Navigate to="/login" replace />
 
   return (
@@ -20,7 +22,7 @@ export function RequireAuth() {
             onClick={() => logout.mutate()}
             className="rounded-md px-2 py-1 text-sm text-zinc-300 hover:bg-zinc-800"
           >
-            Se déconnecter
+            {t('auth.signOut')}
           </button>
         </div>
       </header>

@@ -1,5 +1,6 @@
 //! What `init` proposes and warns about for each provider.
 use liberarr_core::ai::{Capability, Provider, Step, Timestamps};
+use rust_i18n::t;
 
 const OPENAI_URL: &str = "https://api.openai.com/v1";
 
@@ -20,10 +21,10 @@ pub fn defaults(p: Provider, step: Step) -> (Option<&'static str>, Option<&'stat
     }
 }
 
-pub fn warning(c: Capability, step: Step) -> Option<&'static str> {
+pub fn warning(c: Capability, step: Step) -> Option<String> {
     match (step, c.transcription) {
         (Step::Transcribe, Some(Timestamps::TextOnly | Timestamps::Unknown)) => {
-            Some("pas d'horodatage garanti : la lecture ne sera pas synchronisée avec le texte")
+            Some(t!("providers.no_timestamps").into_owned())
         }
         _ => None,
     }

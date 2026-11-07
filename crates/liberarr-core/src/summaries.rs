@@ -1,4 +1,5 @@
 //! Summaries context: LLM output validation, the summarize use case and action toggling.
+use crate::lang::Language;
 use crate::transcription::{Transcript, TranscriptRepo, timestamp};
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -82,19 +83,8 @@ impl ChatMessage {
     }
 }
 
-const SYSTEM_PROMPT: &str = r#"Tu es l'assistant de compte rendu de réunion. On te donne la transcription d'un enregistrement (français, parfois mêlé d'anglais), horodatée ligne par ligne quand c'est possible. Réponds UNIQUEMENT avec un objet JSON de cette forme :
-{
-  "title": "titre court et explicite",
-  "summary_md": "compte rendu en Markdown avec les sections ## Contexte, ## Points clés, ## Décisions",
-  "mindmap": "carte mentale Mermaid commençant par la ligne 'mindmap', racine = sujet principal",
-  "actions": [{"action": "...", "owner": "personne nommée dans la transcription ou null",
-               "due": "échéance seulement si elle est dite, sinon null",
-               "start": secondes du segment où l'action est énoncée, ou null}]
-}
-N'invente rien qui ne soit pas dans la transcription. Rédige en français."#;
-
 /// System prompt plus the transcript: `[mm:ss] text` lines, or the plain text without timestamps.
-pub fn summary_messages(t: &Transcript) -> Vec<ChatMessage> {
+pub fn summary_messages(t: &Transcript, lang: Language) -> Vec<ChatMessage> {
     let body = if t.has_timestamps {
         t.segments
             .iter()
@@ -105,7 +95,7 @@ pub fn summary_messages(t: &Transcript) -> Vec<ChatMessage> {
         t.text.clone()
     };
     vec![
-        ChatMessage::new(Role::System, SYSTEM_PROMPT),
+        ChatMessage::new(Role::System, lang.summary_prompt()),
         ChatMessage::new(Role::User, body),
     ]
 }
@@ -124,6 +114,7 @@ pub struct Summarize<'a, T, L, S> {
     pub transcripts: &'a T,
     pub llm: &'a L,
     pub summaries: &'a S,
+    pub lang: Language,
 }
 
 impl<T: TranscriptRepo, L: Llm, S: SummaryRepo> Summarize<'_, T, L, S> {
@@ -134,7 +125,7 @@ impl<T: TranscriptRepo, L: Llm, S: SummaryRepo> Summarize<'_, T, L, S> {
             .get(recording_id)
             .await?
             .ok_or_else(|| Error::NotFound("transcript".into()))?;
-        let mut messages = summary_messages(&t);
+        let mut messages = summary_messages(&t, self.lang);
         for attempt in 0..2 {
             let reply = self.llm.complete_json(&messages).await?;
             match parse_summary(&reply) {
@@ -145,13 +136,7 @@ impl<T: TranscriptRepo, L: Llm, S: SummaryRepo> Summarize<'_, T, L, S> {
                 Err(e) if attempt == 1 => return Err(e.into()),
                 Err(e) => {
                     messages.push(ChatMessage::new(Role::Assistant, reply));
-                    messages.push(ChatMessage::new(
-                        Role::User,
-                        format!(
-                            "Réponse invalide : {}. Renvoie uniquement le JSON demandé, corrigé.",
-                            e.0
-                        ),
-                    ));
+                    messages.push(ChatMessage::new(Role::User, self.lang.retry_message(&e.0)));
                 }
             }
         }
@@ -214,6 +199,7 @@ mod tests {
             transcripts: &transcripts,
             llm: &llm,
             summaries: &summaries,
+            lang: Language::Fr,
         };
 
         let err = block_on(uc.run(1)).unwrap_err();
