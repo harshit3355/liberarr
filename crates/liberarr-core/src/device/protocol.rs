@@ -16,12 +16,28 @@ pub const FRAME_KEY_EXCHANGE: u16 = 0xFE12;
 pub const FRAME_ECC_SESSION: u16 = 0xFE30;
 
 /// A device seen while scanning.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Advert {
     pub id: String,
     pub serial: String,
     pub protocol: u16,
     pub rssi: i16,
+}
+
+/// Serials must not reach logs: only the last 4 characters are shown.
+impl std::fmt::Debug for Advert {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let tail = self
+            .serial
+            .get(self.serial.len().saturating_sub(4)..)
+            .unwrap_or("");
+        f.debug_struct("Advert")
+            .field("id", &self.id)
+            .field("serial", &format_args!("…{tail}"))
+            .field("protocol", &self.protocol)
+            .field("rssi", &self.rssi)
+            .finish()
+    }
 }
 
 fn u16le(b: &[u8], i: usize) -> Option<u16> {
@@ -205,6 +221,14 @@ mod tests {
             let _ = parse_advert(&m[..n]);
         }
         assert_eq!(parse_advert(&m[..19]), None);
+        let a = Advert {
+            id: "x".into(),
+            serial: "8810b50319526726".into(),
+            protocol: 20,
+            rssi: -40,
+        };
+        let dbg = format!("{a:?}");
+        assert!(dbg.contains("…6726") && !dbg.contains("8810b503"), "{dbg}");
     }
 
     #[test]

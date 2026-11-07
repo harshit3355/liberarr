@@ -10,8 +10,9 @@ fn err(msg: &str) -> Error {
     Error::Device(msg.into())
 }
 
-fn u32le(b: &[u8], i: usize) -> Option<u32> {
-    Some(u32::from_le_bytes(b.get(i..i + 4)?.try_into().ok()?))
+/// Header is at least 512 B (checked by the caller), so the fixed offsets are in range.
+fn header_u32(data: &[u8], i: usize) -> u32 {
+    u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]])
 }
 
 /// Decrypts a downloaded device file into Ogg Opus bytes. Refuses non-v1 headers.
@@ -40,16 +41,20 @@ pub fn decrypt_plaud_file(data: &[u8], priv_key: &RsaPrivateKey) -> Result<Vec<u
     let new =
         || ChaCha20::new_from_slices(ck, &data[132..144]).map_err(|_| err("bad cipher params"));
 
-    match u32le(data, 144).unwrap_or(0) as usize {
+    // The counter and segment size are device-controlled: use the fallible cipher API (an
+    // exhausted keystream would otherwise panic).
+    let exhausted = |_| err("keystream exhausted");
+    match header_u32(data, 144) as usize {
         0 => {
             let mut c = new()?;
-            c.seek(u64::from(u32le(data, 128).unwrap_or(0)) * 64);
-            c.apply_keystream(&mut body);
+            c.try_seek(u64::from(header_u32(data, 128)) * 64)
+                .map_err(exhausted)?;
+            c.try_apply_keystream(&mut body).map_err(exhausted)?;
         }
         // Segmented: each segment restarts at counter 0.
         seg => {
             for s in body.chunks_mut(seg) {
-                new()?.apply_keystream(s);
+                new()?.try_apply_keystream(s).map_err(exhausted)?;
             }
         }
     }
@@ -129,6 +134,9 @@ mod tests {
         let mut bad = ok.clone();
         bad[10..12].copy_from_slice(&u16::MAX.to_le_bytes());
         assert!(decrypt_plaud_file(&bad, key()).is_err());
+        // Counter at the end of the keystream must be an error, not a cipher panic.
+        let wrap = [header(1, u32::MAX, 0), vec![0; 128]].concat();
+        assert!(decrypt_plaud_file(&wrap, key()).is_err());
         let mut bad = ok;
         bad[300] ^= 0xFF; // corrupt wrapped key
         assert!(decrypt_plaud_file(&bad, key()).is_err());
