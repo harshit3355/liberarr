@@ -265,3 +265,17 @@ impl DeviceLedger for Db {
         .await
     }
 }
+
+impl Db {
+    /// When a device session was last pulled (`liberarr status`).
+    pub async fn last_pull(&self) -> Result<Option<jiff::Timestamp>> {
+        let last: Option<String> = self
+            .run(|c| {
+                c.query_row("SELECT MAX(pulled_at) FROM device_sessions", [], |r| {
+                    r.get(0)
+                })
+            })
+            .await?;
+        last.map(|s| s.parse().map_err(storage)).transpose()
+    }
+}

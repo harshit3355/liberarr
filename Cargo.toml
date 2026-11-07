@@ -38,6 +38,8 @@ hkdf = "=0.13.0"
 hmac = "=0.13.0"
 aes = "=0.9.3"
 cbc = { version = "=0.2.1", features = ["alloc"] }
+getrandom = "=0.4.3"
+rpassword = "=7.5.4"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
