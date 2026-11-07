@@ -1,4 +1,5 @@
 //! Pull use case: bring every finished recording off the device, resumably and verified (spec §6.3).
+use super::crypto::private_key_from_pem;
 use super::file::decrypt_plaud_file;
 use super::ports::*;
 use super::protocol::Advert;
@@ -7,8 +8,6 @@ use crate::jobs::JobQueue;
 use crate::recordings::{AudioStore, Ingest, RecordingRepo, Source};
 use crate::{Error, Result};
 use rsa::RsaPrivateKey;
-use rsa::pkcs1::DecodeRsaPrivateKey;
-use rsa::pkcs8::DecodePrivateKey;
 use sha2::{Digest, Sha256};
 use std::future::Future;
 use std::time::Duration;
@@ -97,9 +96,7 @@ where
         sleep: &impl Fn(Duration) -> F,
         report: &mut PullReport,
     ) -> Result<()> {
-        let key = RsaPrivateKey::from_pkcs8_pem(&m.private_pem)
-            .or_else(|_| RsaPrivateKey::from_pkcs1_pem(&m.private_pem))
-            .map_err(|_| Error::Device("stored private key is unreadable".into()));
+        let key = private_key_from_pem(&m.private_pem);
         let hash = serial_hash(&m.serial);
         // A device that cannot be reached must not stop the others: report it and move on.
         let reached = async {
@@ -210,6 +207,10 @@ where
             }
         }
         let data = self.partials.take(part)?;
+        if (data.len() as u64) < u64::from(size) {
+            // A short download that ended "Ok": keep the `.part` so the next pull resumes.
+            return Ok(Err("download ended early: will resume next pull".into()));
+        }
         let checked = if data.len() as u64 != u64::from(size) {
             Err("downloaded size differs from the listed size".to_string())
         } else {
@@ -351,6 +352,29 @@ mod tests {
             i64::from(SESSION)
         );
         assert_eq!(rig.ledger.records.borrow().len(), 1);
+    }
+
+    #[test]
+    fn pull_keeps_part_after_short_ok_download() {
+        let (ogg, file) = ogg_and_device_file();
+        let dev = FakeDevice::with_file(file);
+        dev.0.drop_after.set(Some(300));
+        dev.0.drop_ok.set(true);
+        let rig = Rig::new(dev);
+
+        let first = rig.pull();
+        assert_eq!(first.failed.len(), 1);
+        // Not moved to raw: the next pull resumes instead of restarting from 0.
+        assert!(rig.parts.raw.borrow().is_empty());
+        assert_eq!(rig.parts.len(&Rig::part_key()).unwrap(), 300);
+
+        let second = rig.pull();
+        assert_eq!(second.pulled, vec![1]);
+        assert_eq!(
+            *rig.dev.0.downloads.borrow(),
+            vec![(SESSION, 0), (SESSION, 300)]
+        );
+        assert_eq!(rig.parts.staged.borrow()[&Rig::part_key()], ogg);
     }
 
     #[test]

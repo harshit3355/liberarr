@@ -7,6 +7,7 @@ use base64::engine::general_purpose::{STANDARD, URL_SAFE, URL_SAFE_NO_PAD};
 use cbc::cipher::block_padding::Pkcs7;
 use cbc::cipher::{BlockModeDecrypt, KeyIvInit};
 use hmac::{Hmac, KeyInit, Mac};
+use liberarr_core::device::crypto::private_key_from_pem;
 use liberarr_core::device::link::PlaudAccount;
 use liberarr_core::{Error, Result};
 use serde_json::{Value, json};
@@ -221,7 +222,7 @@ impl PlaudAccount for PlaudCloud {
         };
         match (pem("private_key_base64"), pem("public_key_base64")) {
             (Some(private), Some(public))
-                if private.contains("PRIVATE KEY") && public.contains("PUBLIC KEY") =>
+                if private_key_from_pem(&private).is_ok() && public.contains("PUBLIC KEY") =>
             {
                 Ok((private, public))
             }

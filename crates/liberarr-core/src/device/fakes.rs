@@ -62,6 +62,8 @@ pub struct State {
     pub downloads: RefCell<Vec<(u32, u32)>>,
     /// The next download delivers this many bytes, then drops.
     pub drop_after: Cell<Option<usize>>,
+    /// That drop reports success (a short download) instead of an error.
+    pub drop_ok: Cell<bool>,
     pub ignore_offset: Cell<bool>,
     /// This session reports one more byte on the second `list` (still being recorded).
     pub grow: Cell<Option<u32>>,
@@ -140,6 +142,9 @@ impl DeviceSession for FakeDevice {
         let mut sent = 0;
         for (i, c) in file[from..].chunks(100).enumerate() {
             if limit.is_some_and(|l| sent >= l) {
+                if self.0.drop_ok.take() {
+                    return Ok(());
+                }
                 return Err(Error::Device("link dropped".into()));
             }
             sink((from + i * 100) as u32, c)?;

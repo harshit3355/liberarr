@@ -9,6 +9,15 @@ fn err(msg: &str) -> Error {
     Error::Device(msg.into())
 }
 
+/// The stored device private key, as Plaud returns it: PKCS#8 or PKCS#1 PEM.
+pub fn private_key_from_pem(pem: &str) -> Result<RsaPrivateKey> {
+    use rsa::pkcs1::DecodeRsaPrivateKey;
+    use rsa::pkcs8::DecodePrivateKey;
+    RsaPrivateKey::from_pkcs8_pem(pem)
+        .or_else(|_| RsaPrivateKey::from_pkcs1_pem(pem))
+        .map_err(|_| err("the stored private key is not a valid PEM"))
+}
+
 /// Session key material. No `Debug`: it must never reach a log.
 pub struct UnlockSecret {
     pub key: [u8; 32],
@@ -112,6 +121,18 @@ mod tests {
     use chacha20poly1305::ChaCha20Poly1305;
     use chacha20poly1305::aead::{Aead, KeyInit, Payload};
     use rsa::Pkcs1v15Encrypt;
+
+    #[test]
+    fn private_key_from_pem_accepts_pkcs1_and_pkcs8() {
+        use rsa::pkcs1::EncodeRsaPrivateKey;
+        use rsa::pkcs8::{EncodePrivateKey, LineEnding};
+        let pkcs1 = key().to_pkcs1_pem(LineEnding::LF).unwrap();
+        let pkcs8 = key().to_pkcs8_pem(LineEnding::LF).unwrap();
+        assert!(pkcs1.starts_with("-----BEGIN RSA PRIVATE KEY"));
+        assert_eq!(&private_key_from_pem(&pkcs1).unwrap(), key());
+        assert_eq!(&private_key_from_pem(&pkcs8).unwrap(), key());
+        assert!(private_key_from_pem("not a key").is_err());
+    }
 
     const K: [u8; 32] = [3; 32];
     const N: [u8; 12] = [5; 12];

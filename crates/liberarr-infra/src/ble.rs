@@ -11,12 +11,11 @@ use btleplug::api::{
 };
 use btleplug::platform::{Adapter, Manager, Peripheral};
 use futures::{Stream, StreamExt};
-use liberarr_core::device::crypto::{SessionCipher, open_unlock_secret};
+use liberarr_core::device::crypto::{SessionCipher, open_unlock_secret, private_key_from_pem};
 use liberarr_core::device::ports::{DeviceConnector, DeviceScanner, DeviceSession, UnlockMaterial};
 use liberarr_core::device::protocol::{self as proto, Advert, DataPacket};
 use liberarr_core::{Error, Result};
 use rsa::RsaPrivateKey;
-use rsa::pkcs8::DecodePrivateKey;
 use std::collections::{BTreeMap, HashMap};
 use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -132,8 +131,7 @@ impl DeviceConnector for BtleConnector {
 
     async fn open(&self, ad: &Advert, unlock: &UnlockMaterial) -> Result<BtleSession> {
         // Fail on a bad key before touching the device.
-        let key = RsaPrivateKey::from_pkcs8_pem(&unlock.private_pem)
-            .map_err(|_| dev("the stored private key is not a valid PKCS#8 PEM"))?;
+        let key = private_key_from_pem(&unlock.private_pem)?;
         let peripheral = self
             .adapter
             .peripherals()
