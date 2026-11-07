@@ -224,7 +224,12 @@ impl DeviceSession for BtleSession {
                     offset,
                     bytes,
                 }) if s == session => {
-                    sink(offset, &bytes)?;
+                    if let Err(e) = sink(offset, &bytes) {
+                        // The device keeps streaming: swallow the rest of this transfer so it
+                        // cannot leak into the next download on this link.
+                        self.0.drain_transfer().await;
+                        return Err(e);
+                    }
                 }
                 _ => {}
             }
@@ -354,16 +359,35 @@ impl Link {
         }
     }
 
-    /// Next unlock frame (`0xFE11` key request, `0xFE12` key exchange).
-    async fn recv_unlock(&mut self, secs: u64) -> Result<Vec<u8>> {
+    /// Discards packets until the transfer ends (End/Tail), the link drops, or the device has
+    /// been quiet for 2 s.
+    async fn drain_transfer(&mut self) {
+        while let Ok(p) = self.recv(2).await {
+            if matches!(
+                proto::parse_data_packet(&p),
+                Some(DataPacket::End | DataPacket::Tail)
+            ) {
+                break;
+            }
+        }
+    }
+
+    /// Next unlock frame (`0xFE11` key request, `0xFE12` key exchange); `None` when the device
+    /// stays silent for `secs`. A lost link and an ECC request (`0xFE30`) are errors.
+    async fn recv_unlock(&mut self, secs: u64) -> Result<Option<Vec<u8>>> {
         let deadline = Instant::now() + Duration::from_secs(secs);
         loop {
-            let p = self.recv_until(deadline).await?;
+            let p = match self.recv_until(deadline).await {
+                Ok(p) => p,
+                // `recv_until` fails before the deadline only when the link is gone.
+                Err(_) if Instant::now() >= deadline => return Ok(None),
+                Err(e) => return Err(e),
+            };
             match proto::frame_id(&p) {
-                Some(proto::FRAME_KEY_REQUEST | proto::FRAME_KEY_EXCHANGE) => return Ok(p),
+                Some(proto::FRAME_KEY_REQUEST | proto::FRAME_KEY_EXCHANGE) => return Ok(Some(p)),
                 Some(proto::FRAME_ECC_SESSION) => {
                     return Err(dev(
-                        "the device asked for an ECC session, which is not supported",
+                        "the device uses protocol 30 (ECC), which is not supported in v2",
                     ));
                 }
                 _ => {}
@@ -388,7 +412,7 @@ impl Link {
         for (i, chunk) in chunks.iter().enumerate() {
             self.send(chunk).await?;
             let wait = if i + 1 < chunks.len() { 3 } else { 10 };
-            last = self.recv_unlock(wait).await.ok();
+            last = self.recv_unlock(wait).await?;
             if let Some(p) = &last {
                 parts.absorb(p);
             }
@@ -412,9 +436,9 @@ impl Link {
             .await?;
         }
         while !parts.complete() {
-            let p = self.recv_unlock(10).await.map_err(|e| {
+            let p = self.recv_unlock(10).await?.ok_or_else(|| {
                 dev(format!(
-                    "no session secret from the device ({} parts so far): {e}",
+                    "no session secret from the device ({} parts so far)",
                     parts.parts.len()
                 ))
             })?;
