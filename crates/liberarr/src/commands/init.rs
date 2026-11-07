@@ -71,13 +71,36 @@ fn prompt(question: &str, default: Option<&str>, hidden: bool) -> std::io::Resul
 /// capability warning with the default model.
 fn ask_provider(question: &str, step: Step) -> std::io::Result<Provider> {
     loop {
-        let label = format!("{question} (openai, openai-compatible, mistral, anthropic)");
+        let label = format!("{question} (openai, openai-compatible, mistral, anthropic, claude)");
         let v = prompt(&label, Some("openai"), false)?;
         match Provider::parse(v.trim()) {
             Some(p) if supports(capability(p, ""), step) => return Ok(p),
             _ => eprintln!("Fournisseur inconnu, ou qui ne sait pas faire cette étape."),
         }
     }
+}
+
+/// True when `claude auth status` exits 0 within a few seconds. Output is discarded: no token is read.
+fn claude_connected() -> bool {
+    let Ok(mut child) = std::process::Command::new("claude")
+        .args(["auth", "status"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    for _ in 0..50 {
+        match child.try_wait() {
+            Ok(Some(s)) => return s.success(),
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(100)),
+            Err(_) => return false,
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    false
 }
 
 /// Replaces the lines of `updates` in place, appends the others, keeps everything else as is.
@@ -135,6 +158,11 @@ pub fn run() -> Outcome {
     {
         // Asked only when neither the provider nor the base URL is set: never overwrites a choice.
         let provider = if missing(provider_var) && missing(url_var) {
+            if step == Step::Summarize && claude_connected() {
+                println!(
+                    "Claude détecté et connecté : le fournisseur « claude » utilise ton abonnement via la CLI officielle. Usage toléré mais non garanti par Anthropic ; la clé API (« anthropic ») est recommandée."
+                );
+            }
             let p = ask_provider(provider_q, step)?;
             updates.push((provider_var, p.as_str().to_string()));
             p
@@ -145,10 +173,12 @@ pub fn run() -> Outcome {
                 .unwrap_or(Provider::Compatible)
         };
         let (default_url, default_model) = providers::defaults(provider, step);
-        if missing(url_var) {
+        // The claude CLI has its own login: no URL, no key.
+        let needs_api = provider != Provider::Claude;
+        if needs_api && missing(url_var) {
             updates.push((url_var, prompt(url_q, default_url, false)?));
         }
-        if missing(key_var) {
+        if needs_api && missing(key_var) {
             updates.push((key_var, prompt(key_q, None, true)?));
         }
         if missing(model_var) {
