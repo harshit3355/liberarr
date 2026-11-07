@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef } from 'react'
 import Markdown from 'react-markdown'
 import { Link, useParams } from 'react-router'
 import { ActionsTable } from '../summaries/ActionsTable'
@@ -17,7 +17,6 @@ export function RecordingPage() {
   const { data: rec, isLoading, isError } = useRecording(id)
   const rerun = useRerun(id)
   const audio = useRef<HTMLAudioElement>(null)
-  const [time, setTime] = useState(0)
 
   const seek = (seconds: number) => {
     if (!audio.current) return
@@ -79,7 +78,6 @@ export function RecordingPage() {
         ref={audio}
         controls
         src={`/api/recordings/${id}/audio`}
-        onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
         className="sticky top-2 z-10 w-full"
       />
 
@@ -87,9 +85,9 @@ export function RecordingPage() {
         <>
           <section>
             <h2 className={h2}>Résumé</h2>
-            {/* react-markdown renders no raw HTML by default. */}
-            <div className="space-y-2 [&_h2]:mt-4 [&_h2]:font-semibold [&_li]:ml-5 [&_ul]:list-disc">
-              <Markdown>{rec.summary.summary_md}</Markdown>
+            {/* No raw HTML (react-markdown default) and no images: a remote URL in LLM output would leak. */}
+            <div className="space-y-2 [&_a]:text-emerald-400 [&_a]:underline [&_h1]:mt-4 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mt-4 [&_h2]:font-semibold [&_h3]:mt-3 [&_h3]:font-semibold [&_li]:ml-5 [&_ol]:list-decimal [&_ul]:list-disc">
+              <Markdown disallowedElements={['img']}>{rec.summary.summary_md}</Markdown>
             </div>
           </section>
           <section>
@@ -106,7 +104,7 @@ export function RecordingPage() {
       {rec.transcript && (
         <section>
           <h2 className={h2}>Transcription</h2>
-          <TranscriptView transcript={rec.transcript} currentTime={time} onSeek={seek} />
+          <TranscriptView transcript={rec.transcript} audio={audio} onSeek={seek} />
         </section>
       )}
     </main>

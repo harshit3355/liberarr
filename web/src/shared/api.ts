@@ -16,5 +16,7 @@ export async function api<T = void>(path: string, init: RequestInit = {}): Promi
     const body = (await res.json().catch(() => ({}))) as { detail?: string }
     throw new ApiError(res.status, body.detail ?? res.statusText)
   }
-  return (res.status === 204 ? undefined : await res.json()) as T
+  // 204 and 202 (rerun) carry no body.
+  const text = await res.text()
+  return (text ? JSON.parse(text) : undefined) as T
 }
