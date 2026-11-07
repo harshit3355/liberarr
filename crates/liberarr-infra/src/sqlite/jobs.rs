@@ -1,8 +1,10 @@
 //! `JobQueue` on SQLite. Claims are atomic across processes.
-use super::{Db, now, write_tx};
-use liberarr_core::Result;
+use super::{Db, now, storage, write_tx};
 use liberarr_core::jobs::{Job, JobInfo, JobQueue, JobStatus};
+use liberarr_core::{Error, Result};
 use rusqlite::{OptionalExtension, params};
+use std::fs::TryLockError;
+use std::sync::Arc;
 
 fn parse_status(s: &str) -> rusqlite::Result<JobStatus> {
     Ok(match s {
@@ -20,12 +22,14 @@ fn parse_status(s: &str) -> rusqlite::Result<JobStatus> {
     })
 }
 
-/// A stale or unknown job id is an error, never a silent no-op.
-fn expect_one(changed: usize) -> rusqlite::Result<()> {
+/// A stale worker finishing a job that was re-queued (or already finished) must not go through.
+fn expect_running(changed: usize) -> Result<()> {
     if changed == 1 {
         Ok(())
     } else {
-        Err(rusqlite::Error::StatementChangedRows(changed))
+        Err(Error::Storage(
+            "job is not running (re-queued or already finished)".into(),
+        ))
     }
 }
 
@@ -72,44 +76,74 @@ impl JobQueue for Db {
     async fn complete(&self, job: &Job, then: Option<&str>) -> Result<()> {
         let (id, recording_id) = (job.id, job.recording_id);
         let then = then.map(str::to_owned);
-        self.run(move |c| {
-            let tx = write_tx(c)?;
-            let t = now();
-            expect_one(tx.execute(
-                "UPDATE jobs SET status = 'done', updated_at = ?2 WHERE id = ?1",
-                params![id, t],
-            )?)?;
-            if let Some(step) = then {
-                tx.execute(
-                    "INSERT INTO jobs (recording_id, step, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
-                    params![recording_id, step, t],
+        let changed = self
+            .run(move |c| {
+                let tx = write_tx(c)?;
+                let t = now();
+                let changed = tx.execute(
+                    "UPDATE jobs SET status = 'done', updated_at = ?2
+                     WHERE id = ?1 AND status = 'running'",
+                    params![id, t],
                 )?;
-            }
-            tx.commit()
-        })
-        .await
+                if changed != 1 {
+                    return Ok(changed); // dropped transaction rolls back: nothing is enqueued
+                }
+                if let Some(step) = then {
+                    tx.execute(
+                        "INSERT INTO jobs (recording_id, step, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
+                        params![recording_id, step, t],
+                    )?;
+                }
+                tx.commit()?;
+                Ok(changed)
+            })
+            .await?;
+        expect_running(changed)
     }
 
     async fn fail(&self, job: &Job, error: &str) -> Result<()> {
         let (id, error) = (job.id, error.to_owned());
-        self.run(move |c| {
-            expect_one(c.execute(
-                "UPDATE jobs SET status = 'failed', error = ?2, updated_at = ?3 WHERE id = ?1",
-                params![id, error, now()],
-            )?)
-        })
-        .await
+        let changed = self
+            .run(move |c| {
+                c.execute(
+                    "UPDATE jobs SET status = 'failed', error = ?2, updated_at = ?3
+                     WHERE id = ?1 AND status = 'running'",
+                    params![id, error, now()],
+                )
+            })
+            .await?;
+        expect_running(changed)
     }
 
+    /// Call once at startup, before claiming: it re-queues `running` jobs only when no other
+    /// worker is alive. Liveness is a lock on `<db>.workers`: every worker holds it shared for
+    /// the life of the process (taken here), so an exclusive lock succeeds only when all
+    /// earlier workers are dead.
     async fn reset_stale(&self) -> Result<u64> {
-        self.run(|c| {
-            let n = c.execute(
-                "UPDATE jobs SET status = 'queued', updated_at = ?1 WHERE status = 'running'",
-                [now()],
-            )?;
-            Ok(n as u64)
-        })
-        .await
+        let sole = match self.workers.try_lock() {
+            Ok(()) => true,
+            Err(TryLockError::WouldBlock) => false,
+            Err(TryLockError::Error(e)) => return Err(storage(e)),
+        };
+        let requeued = if sole {
+            self.run(|c| {
+                let n = c.execute(
+                    "UPDATE jobs SET status = 'queued', updated_at = ?1 WHERE status = 'running'",
+                    [now()],
+                )?;
+                Ok(n as u64)
+            })
+            .await
+        } else {
+            Ok(0)
+        };
+        // Downgrade (or take) the shared lock and keep it, even if the requeue failed.
+        let lock = Arc::clone(&self.workers);
+        tokio::task::spawn_blocking(move || lock.lock_shared())
+            .await
+            .map_err(storage)?
+            .map_err(storage)?;
+        requeued
     }
 
     async fn list_for(&self, recording_id: i64) -> Result<Vec<JobInfo>> {

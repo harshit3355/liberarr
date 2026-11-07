@@ -6,6 +6,7 @@ mod schema;
 use liberarr_core::{Error, Result};
 use rusqlite::types::Type;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
+use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -30,6 +31,8 @@ fn parse_ts(col: usize, s: &str) -> rusqlite::Result<jiff::Timestamp> {
 #[derive(Clone)]
 pub struct Db {
     conn: Arc<Mutex<Connection>>,
+    /// `<db>.workers`, held shared once `reset_stale` ran: marks this process as a live worker.
+    workers: Arc<File>,
 }
 
 impl Db {
@@ -43,9 +46,18 @@ impl Db {
             .map_err(storage)?;
         conn.pragma_update(None, "foreign_keys", true)
             .map_err(storage)?;
-        schema::migrate(&mut conn).map_err(storage)?;
+        schema::migrate(&mut conn)?;
+        let mut lock_path = path.as_os_str().to_owned();
+        lock_path.push(".workers");
+        let workers = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(lock_path)
+            .map_err(storage)?;
         Ok(Db {
             conn: Arc::new(Mutex::new(conn)),
+            workers: Arc::new(workers),
         })
     }
 
@@ -164,6 +176,7 @@ mod tests {
             RecordingStatus::Processing
         );
 
+        // No other worker holds the lock: the job is a leftover of a dead process.
         assert_eq!(db.reset_stale().await.unwrap(), 1);
         assert_eq!(db.list_for(rec).await.unwrap()[0].status, JobStatus::Queued);
 
@@ -174,6 +187,42 @@ mod tests {
         let item = &db.list_items().await.unwrap()[0];
         assert_eq!(item.status, RecordingStatus::Failed);
         assert_eq!(item.failed_step.as_deref(), Some("transcribe"));
+    }
+
+    #[tokio::test]
+    async fn reset_stale_spares_jobs_of_live_worker() {
+        let t = TempDb::new("live");
+        let a = Db::open(&t.path()).unwrap();
+        assert_eq!(a.reset_stale().await.unwrap(), 0); // A is now a live worker
+        let rec = a.add(new_rec("h1")).await.unwrap();
+        a.enqueue(rec, "transcribe").await.unwrap();
+        a.claim_next().await.unwrap().unwrap();
+
+        let b = Db::open(&t.path()).unwrap();
+        assert_eq!(b.reset_stale().await.unwrap(), 0);
+        assert_eq!(b.list_for(rec).await.unwrap()[0].status, JobStatus::Running);
+
+        // Both workers gone: a later start requeues the orphan.
+        drop((a, b));
+        let c = Db::open(&t.path()).unwrap();
+        assert_eq!(c.reset_stale().await.unwrap(), 1);
+        assert_eq!(c.list_for(rec).await.unwrap()[0].status, JobStatus::Queued);
+    }
+
+    #[tokio::test]
+    async fn complete_on_requeued_job_does_not_enqueue_twice() {
+        let t = TempDb::new("requeued");
+        let db = Db::open(&t.path()).unwrap();
+        let rec = db.add(new_rec("h1")).await.unwrap();
+        db.enqueue(rec, "transcribe").await.unwrap();
+        let stale = db.claim_next().await.unwrap().unwrap();
+        db.reset_stale().await.unwrap(); // the job goes back to queued
+
+        assert!(db.complete(&stale, Some("summarize")).await.is_err());
+        assert!(db.fail(&stale, "late").await.is_err());
+        let jobs = db.list_for(rec).await.unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].status, JobStatus::Queued);
     }
 
     #[tokio::test]

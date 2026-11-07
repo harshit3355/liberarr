@@ -12,8 +12,9 @@ use rusqlite::{OptionalExtension, params};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-fn conversion(col: usize, e: impl std::error::Error + Send + Sync + 'static) -> rusqlite::Error {
-    rusqlite::Error::FromSqlConversionFailure(col, Type::Text, Box::new(e))
+/// Fixed message: serde errors can quote the stored (private) content.
+fn corrupt_json(col: usize) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(col, Type::Text, "invalid JSON in column".into())
 }
 
 fn parse_source(col: usize, s: &str) -> rusqlite::Result<Source> {
@@ -175,7 +176,7 @@ impl TranscriptRepo for Db {
                 |r| {
                     let segments: Vec<(f64, f64, String)> =
                         serde_json::from_str(&r.get::<_, String>(3)?)
-                            .map_err(|e| conversion(3, e))?;
+                            .map_err(|_| corrupt_json(3))?;
                     Ok(Transcript {
                         engine: r.get(0)?,
                         language: r.get(1)?,
@@ -223,7 +224,7 @@ impl SummaryRepo for Db {
                         summary_md: r.get(1)?,
                         mindmap: r.get(2)?,
                         actions: serde_json::from_str(&r.get::<_, String>(3)?)
-                            .map_err(|e| conversion(3, e))?,
+                            .map_err(|_| corrupt_json(3))?,
                     })
                 },
             )

@@ -1,4 +1,6 @@
 //! Schema migrations, tracked with `PRAGMA user_version`: `MIGRATIONS[i]` takes version i to i+1.
+use super::storage;
+use liberarr_core::{Error, Result};
 use rusqlite::{Connection, TransactionBehavior};
 
 pub(super) const MIGRATIONS: &[&str] = &["
@@ -51,12 +53,23 @@ CREATE TABLE device_sessions (
 
 /// Applies the pending migrations in one `BEGIN IMMEDIATE` transaction. The version is re-read
 /// inside it, so two processes opening the same file never both apply a migration.
-pub(super) fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let version: i64 = tx.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    for (i, sql) in MIGRATIONS.iter().enumerate().skip(version as usize) {
-        tx.execute_batch(sql)?;
-        tx.pragma_update(None, "user_version", i as i64 + 1)?;
+/// Refuses a database written by a newer liberarr instead of running on a schema it does not know.
+pub(super) fn migrate(conn: &mut Connection) -> Result<()> {
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(storage)?;
+    let version: i64 = tx
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .map_err(storage)?;
+    if version > MIGRATIONS.len() as i64 {
+        return Err(Error::Storage(
+            "database created by a newer liberarr".into(),
+        ));
     }
-    tx.commit()
+    for (i, sql) in MIGRATIONS.iter().enumerate().skip(version as usize) {
+        tx.execute_batch(sql).map_err(storage)?;
+        tx.pragma_update(None, "user_version", i as i64 + 1)
+            .map_err(storage)?;
+    }
+    tx.commit().map_err(storage)
 }
