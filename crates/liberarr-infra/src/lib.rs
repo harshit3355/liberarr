@@ -3,6 +3,7 @@
 pub mod ai;
 pub mod anthropic;
 pub mod ble;
+pub mod claude_cli;
 pub mod files;
 mod http;
 pub mod keystore;

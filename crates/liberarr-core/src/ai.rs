@@ -10,6 +10,8 @@ pub enum Provider {
     OpenAi,
     Mistral,
     Anthropic,
+    /// The user's logged-in `claude` CLI (subscription), summaries only.
+    Claude,
 }
 
 impl Provider {
@@ -19,6 +21,7 @@ impl Provider {
             "openai" => Provider::OpenAi,
             "mistral" => Provider::Mistral,
             "anthropic" => Provider::Anthropic,
+            "claude" => Provider::Claude,
             _ => return None,
         })
     }
@@ -29,6 +32,7 @@ impl Provider {
             Provider::OpenAi => "openai",
             Provider::Mistral => "mistral",
             Provider::Anthropic => "anthropic",
+            Provider::Claude => "claude",
         }
     }
 }
@@ -55,7 +59,7 @@ pub struct Capability {
 
 pub fn capability(p: Provider, model: &str) -> Capability {
     let transcription = match (p, model) {
-        (Provider::Anthropic, _) => None,
+        (Provider::Anthropic | Provider::Claude, _) => None,
         (Provider::OpenAi, "whisper-1") => Some(Timestamps::Segments),
         (
             Provider::OpenAi,

@@ -13,6 +13,7 @@ use liberarr_core::transcription::{
 use liberarr_core::{Error, Result};
 use liberarr_infra::ai::OpenAiCompat;
 use liberarr_infra::anthropic::AnthropicLlm;
+use liberarr_infra::claude_cli::ClaudeCli;
 use liberarr_infra::files::{FsAudioStore, FsNoteStore, FsPartialStore, OggSplitter};
 use liberarr_infra::keystore::FileKeyStore;
 use liberarr_infra::mistral::MistralTranscriber;
@@ -37,6 +38,7 @@ enum AnyTranscriber {
 enum AnyLlm {
     Compat(OpenAiCompat),
     Anthropic(AnthropicLlm),
+    Claude(ClaudeCli),
 }
 
 fn transcriber(p: &Profile) -> AnyTranscriber {
@@ -56,6 +58,7 @@ fn llm(p: &Profile) -> AnyLlm {
     let (url, key, model) = (p.base_url.clone(), p.api_key.clone(), p.model.clone());
     match p.provider {
         Provider::Anthropic => AnyLlm::Anthropic(AnthropicLlm::new(url, key, model)),
+        Provider::Claude => AnyLlm::Claude(ClaudeCli::new(p.model.clone())),
         _ => AnyLlm::Compat(OpenAiCompat::new(url, key, model, true)),
     }
 }
@@ -81,6 +84,7 @@ impl Llm for AnyLlm {
         match self {
             Self::Compat(l) => l.complete_json(messages).await,
             Self::Anthropic(l) => l.complete_json(messages).await,
+            Self::Claude(l) => l.complete_json(messages).await,
         }
     }
 }

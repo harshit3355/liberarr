@@ -97,7 +97,7 @@ fn load_from(home: &Path, get: impl Fn(&str) -> Option<String>) -> Result<Config
         let provider = match get(&var).filter(|v| !v.trim().is_empty()) {
             None => Provider::Compatible,
             Some(v) => Provider::parse(v.trim()).ok_or_else(|| {
-                format!("{var} n'est pas reconnu (openai-compatible, openai, mistral, anthropic)")
+                format!("{var} n'est pas reconnu (openai-compatible, openai, mistral, anthropic, claude)")
             })?,
         };
         let model = need(&format!("LIBERARR_{p}_MODEL"))?;
@@ -108,10 +108,19 @@ fn load_from(home: &Path, get: impl Fn(&str) -> Option<String>) -> Result<Config
             };
             return Err(format!("{var} : ce fournisseur ne sait pas {verb}"));
         }
+        // The claude CLI uses its own login: no URL, no key.
+        let (base_url, api_key) = if provider == Provider::Claude {
+            (String::new(), String::new())
+        } else {
+            (
+                need(&format!("LIBERARR_{p}_BASE_URL"))?,
+                need(&format!("LIBERARR_{p}_API_KEY"))?,
+            )
+        };
         Ok(Profile {
             provider,
-            base_url: need(&format!("LIBERARR_{p}_BASE_URL"))?,
-            api_key: need(&format!("LIBERARR_{p}_API_KEY"))?,
+            base_url,
+            api_key,
             model,
         })
     };
