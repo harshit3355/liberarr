@@ -12,7 +12,7 @@ pub use check::connect;
 pub use noninteractive::from_env;
 pub use plain::PlainPrompter;
 
-use crate::config::is_unset;
+use crate::config::{is_unset, parse_routing};
 use crate::{models, providers};
 use liberarr_core::ai::{Provider, Step, capability, supports};
 use liberarr_core::lang::Language;
@@ -138,6 +138,23 @@ fn ask_url(p: &mut dyn Prompter, question: &str, default: Option<&str>) -> Setup
     Err(t!("setup.aborted").into_owned().into())
 }
 
+/// Asks for the optional OpenRouter provider list until it is valid, at most [`KEY_TRIES`] times.
+/// Returns the normalized list, empty for no restriction (`-`; the prompt never returns an empty
+/// string, so the default is `-` when there is no current list).
+fn ask_routing(p: &mut dyn Prompter, default: Option<&str>) -> SetupResult<String> {
+    for _ in 0..KEY_TRIES {
+        let v = p.text(&t!("init.summarize.routing"), Some(default.unwrap_or("-")))?;
+        if v.trim() == "-" {
+            return Ok(String::new());
+        }
+        if let Some(list) = parse_routing(&v) {
+            return Ok(list.join(","));
+        }
+        p.warn(&t!("config.routing_invalid", var = ROUTING_ONLY));
+    }
+    Err(t!("setup.aborted").into_owned().into())
+}
+
 /// The value of `key` unless missing, empty or a placeholder.
 pub(crate) fn current(env: &HashMap<String, String>, key: &str) -> Option<String> {
     env.get(key)
@@ -252,6 +269,19 @@ fn configure(
         let (default_url, default_model) = providers::defaults(provider, step);
         let own = |k: &str| current(env, k).filter(|_| !changed);
 
+        // Optional, so an empty answer is written (`KEY=`): its absence means "not asked yet".
+        if provider == Provider::OpenRouter && (reconf || !env.contains_key(ROUTING_ONLY)) {
+            let routing = ask_routing(p, own(ROUTING_ONLY).as_deref())?;
+            if routing.is_empty() {
+                p.warn(&t!("init.openrouter_unrestricted"));
+            } else {
+                p.info(&t!("init.openrouter_shared_capacity"));
+            }
+            if env.get(ROUTING_ONLY).map(|v| v.trim()) != Some(routing.as_str()) {
+                updates.push((ROUTING_ONLY, routing));
+            }
+        }
+
         // The claude CLI has its own login: no URL, no key.
         let needs_api = provider != Provider::Claude;
         let mut url = own(url_var).unwrap_or_default();
@@ -283,6 +313,11 @@ fn configure(
         }
 
         if model_asked {
+            // OpenRouter lists hundreds of models: the question gives an example instead.
+            let model_q = match provider {
+                Provider::OpenRouter => "init.summarize.model_openrouter",
+                _ => model_q,
+            };
             let model = ask_model(
                 p,
                 &t!(model_q),
@@ -312,6 +347,7 @@ fn configure(
     Ok(updates)
 }
 
+pub(crate) const ROUTING_ONLY: &str = "LIBERARR_LLM_ROUTING_ONLY";
 pub(crate) const CONTENT_LANGUAGE: &str = "LIBERARR_CONTENT_LANGUAGE";
 
 /// Language of the summaries and the note headings; defaults to the current value, else the UI's.
@@ -359,6 +395,7 @@ fn ask_provider(
         Provider::Compatible,
         Provider::Mistral,
         Provider::Anthropic,
+        Provider::OpenRouter,
         Provider::Claude,
     ]
     .into_iter()

@@ -15,6 +15,9 @@ pub struct Profile {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    /// OpenRouter only: the provider slugs a request is restricted to (`LIBERARR_LLM_ROUTING_ONLY`).
+    /// Empty: no restriction (and for every other provider).
+    pub routing_only: Vec<String>,
 }
 
 pub struct Config {
@@ -60,6 +63,22 @@ pub fn parse_env(text: &str) -> HashMap<String, String> {
             Some((k.trim().to_string(), v.to_string()))
         })
         .collect()
+}
+
+/// A comma-separated list of OpenRouter provider slugs: trimmed, non-empty, made of lowercase
+/// letters, digits, `.`, `_`, `-` and `/` (a variant, never leading or trailing).
+pub fn parse_routing(v: &str) -> Option<Vec<String>> {
+    let list: Vec<String> = v.split(',').map(|s| s.trim().to_string()).collect();
+    list.iter()
+        .all(|s| {
+            s.chars()
+                .any(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                && !s.starts_with('/')
+                && !s.ends_with('/')
+                && s.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "./-_".contains(c))
+        })
+        .then_some(list)
 }
 
 pub fn is_unset(v: &str) -> bool {
@@ -119,11 +138,19 @@ fn load_from(
                 need(&format!("LIBERARR_{p}_API_KEY"))?,
             )
         };
+        // Optional: without it, OpenRouter may serve the request with its own shared models.
+        let var = format!("LIBERARR_{p}_ROUTING_ONLY");
+        let routing_only = match get(&var).filter(|v| !v.trim().is_empty()) {
+            Some(v) if provider == Provider::OpenRouter => parse_routing(&v)
+                .ok_or_else(|| t!("config.routing_invalid", var = var).into_owned())?,
+            _ => Vec::new(),
+        };
         Ok(Profile {
             provider,
             base_url,
             api_key,
             model,
+            routing_only,
         })
     };
     let configured = get("LIBERARR_CONTENT_LANGUAGE").filter(|v| !v.trim().is_empty());
@@ -221,6 +248,30 @@ LIBERARR_LLM_MODEL=gpt
 
     fn provider_line(key: &str, value: &str) -> String {
         format!("{VALID}{key}={value}\n")
+    }
+
+    #[test]
+    fn openrouter_routing_list_is_optional_but_validated() {
+        let or = |routing: Option<&str>| {
+            let mut t = provider_line("LIBERARR_LLM_PROVIDER", "openrouter");
+            if let Some(r) = routing {
+                t.push_str(&format!("LIBERARR_LLM_ROUTING_ONLY={r}\n"));
+            }
+            load_text(&t)
+        };
+        assert_eq!(or(Some("azure")).ok().unwrap().llm.routing_only, ["azure"]);
+        for none in [None, Some("")] {
+            assert!(or(none).ok().unwrap().llm.routing_only.is_empty());
+        }
+        for bad in ["azure,", "Azure!", "-"] {
+            let msg = or(Some(bad)).err().unwrap();
+            assert!(msg.contains("LIBERARR_LLM_ROUTING_ONLY"), "{msg}");
+            // `-` is also in the hint text: only longer values prove the value is not echoed.
+            assert!(
+                (bad.len() < 2 || !msg.contains(bad)) && !msg.contains("sk-b"),
+                "{msg}"
+            );
+        }
     }
 
     #[test]

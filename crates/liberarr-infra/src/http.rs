@@ -64,8 +64,25 @@ async fn exchange(
         ))
     })?;
     let json: Option<Value> = serde_json::from_str(&body).ok();
-    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-        // Providers quote a masked key in these messages: keep only the status.
+    let msg = json
+        .as_ref()
+        // `/error/message` (OpenAI, Anthropic) or a top-level `/message` (Mistral).
+        .and_then(|j| {
+            j.pointer("/error/message")
+                .or_else(|| j.pointer("/message"))?
+                .as_str()
+        })
+        .filter(|m| {
+            let m = m.to_lowercase();
+            !["key", "token", "bearer", "sk-"]
+                .iter()
+                .any(|w| m.contains(w))
+        })
+        .map(|m| format!(": {}", m.chars().take(200).collect::<String>()))
+        .unwrap_or_default();
+    // Providers quote a masked key in these messages: keep only the status. A 403 can also be a
+    // plan or region refusal: its short message (filtered above) is then more useful.
+    if status == StatusCode::UNAUTHORIZED || (status == StatusCode::FORBIDDEN && msg.is_empty()) {
         return Err(Error::Provider(format!(
             "provider refused the API key (HTTP {status})"
         )));
@@ -77,17 +94,6 @@ async fn exchange(
         ));
     }
     if !status.is_success() {
-        let msg = json
-            .as_ref()
-            // `/error/message` (OpenAI, Anthropic) or a top-level `/message` (Mistral).
-            .and_then(|j| {
-                j.pointer("/error/message")
-                    .or_else(|| j.pointer("/message"))?
-                    .as_str()
-            })
-            .filter(|m| !m.to_lowercase().contains("key"))
-            .map(|m| format!(": {}", m.chars().take(200).collect::<String>()))
-            .unwrap_or_default();
         return Err(Error::Provider(format!("HTTP {status}{msg}")));
     }
     json.ok_or_else(|| Error::Provider(format!("HTTP {status}: reply is not JSON")))

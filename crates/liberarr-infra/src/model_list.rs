@@ -9,7 +9,8 @@ use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(15);
 
-/// `GET {base}/models` (bearer) or, for Anthropic, `GET {base}/v1/models`. Reads `data[].id`; any
+/// `GET {base}/models` (bearer) or, for Anthropic, `GET {base}/v1/models`; OpenRouter: `GET {base}/key`,
+/// empty list on success. Reads `data[].id`; any
 /// other JSON shape gives an empty list. The `claude` CLI has no HTTP API.
 pub async fn list_models(provider: Provider, base_url: &str, api_key: &str) -> Result<Vec<String>> {
     let base = base_url.trim_end_matches('/');
@@ -17,6 +18,19 @@ pub async fn list_models(provider: Provider, base_url: &str, api_key: &str) -> R
     let reply = match provider {
         Provider::Claude => {
             return Err(Error::Provider("the claude CLI has no model list".into()));
+        }
+        // `/models` is public (it proves nothing about the key) and lists 400+ entries: test the
+        // key on `/key` and offer nothing to pick from.
+        Provider::OpenRouter => {
+            http::get(
+                &http,
+                &format!("{base}/key"),
+                Auth::Bearer(api_key),
+                TIMEOUT,
+                |b| b,
+            )
+            .await?;
+            return Ok(Vec::new());
         }
         // Without `limit`, Anthropic returns only the first 20 models.
         Provider::Anthropic => {

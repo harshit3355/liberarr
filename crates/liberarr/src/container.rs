@@ -59,6 +59,9 @@ fn llm(p: &Profile) -> AnyLlm {
     match p.provider {
         Provider::Anthropic => AnyLlm::Anthropic(AnthropicLlm::new(url, key, model)),
         Provider::Claude => AnyLlm::Claude(ClaudeCli::new(p.model.clone())),
+        Provider::OpenRouter if !p.routing_only.is_empty() => {
+            AnyLlm::Compat(OpenAiCompat::new(url, key, model, true).with_routing(&p.routing_only))
+        }
         _ => AnyLlm::Compat(OpenAiCompat::new(url, key, model, true)),
     }
 }

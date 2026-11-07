@@ -57,6 +57,8 @@ Two profiles in `.env`, each with its own `BASE_URL`, `API_KEY` and `MODEL`: `LI
 - **Summary**: OpenAI, Groq, Gemini (OpenAI-compatible base URL), or Claude through a gateway.
 - **Claude**: through an OpenAI-compatible gateway (for example LiteLLM). For the **summary only**: Claude does not transcribe audio, so keep a speech-to-text provider on the transcribe profile.
 
+- **OpenRouter** (`openrouter`, summary only): OpenRouter's OpenAI-compatible API, with an optional restriction to your own provider keys (BYOK, for example Azure). Settings: `LIBERARR_LLM_BASE_URL` (`https://openrouter.ai/api/v1`), `LIBERARR_LLM_API_KEY` and, optionally, `LIBERARR_LLM_ROUTING_ONLY`, a comma-separated list of provider names (such as `azure`). With a list, every request is restricted to those providers, with no fallback. Without it (missing or empty), OpenRouter may serve requests with its own shared models. `init` tests the key but lists no models: type the model id (such as `openai/gpt-6-luna`); to clear the list when reconfiguring, answer `-`. To be sure only your own key is used, also set the key's "Shared capacity fallback" to "Never use shared capacity for any model on this provider" in your OpenRouter BYOK settings.
+
 Transcription forces no language, so French mixed with English works. Summaries are in French. Audio above 25 MB is split without ffmpeg only for Ogg (the device format); other formats above 25 MB are refused.
 
 ## Web UI and network exposure

@@ -18,6 +18,8 @@ pub struct OpenAiCompat {
     model: String,
     /// `verbose_json` (segments) or `json` (text only), for models that reject `verbose_json`.
     ask_segments: bool,
+    /// The `provider` object of a chat request (OpenRouter routing), when set.
+    routing: Option<Value>,
     http: reqwest::Client,
 }
 
@@ -28,8 +30,17 @@ impl OpenAiCompat {
             api_key,
             model,
             ask_segments,
+            routing: None,
             http: http::client(),
         }
+    }
+
+    /// Chat requests only go to these providers, with no fallback: OpenRouter's own shared models
+    /// stay out of reach (`only` is the real guard; `allow_fallbacks: false` alone is not enough).
+    pub fn with_routing(mut self, only: &[String]) -> Self {
+        self.routing =
+            Some(json!({"only": only, "allow_fallbacks": false, "require_parameters": true}));
+        self
     }
 
     async fn send(
@@ -113,11 +124,14 @@ impl Transcriber for OpenAiCompat {
 
 impl Llm for OpenAiCompat {
     async fn complete_json(&self, messages: &[ChatMessage]) -> Result<String> {
-        let body = json!({
+        let mut body = json!({
             "model": self.model,
             "messages": messages.iter().map(|m| json!({"role": m.role.as_str(), "content": m.content})).collect::<Vec<_>>(),
             "response_format": {"type": "json_object"},
         });
+        if let Some(routing) = &self.routing {
+            body["provider"] = routing.clone();
+        }
         let r = self
             .send("chat/completions", CHAT_TIMEOUT, |b| {
                 b.header("content-type", "application/json")
@@ -196,6 +210,15 @@ mod tests {
                 }),
             )
             .route(
+                "/echo/chat/completions",
+                // Replies with the `provider` field it received, as the message content.
+                post(|body: String| async move {
+                    let v: Value = serde_json::from_str(&body).unwrap();
+                    let seen = v.get("provider").cloned().unwrap_or(Value::Null);
+                    json!({"choices":[{"message":{"content": seen.to_string()}}]}).to_string()
+                }),
+            )
+            .route(
                 "/denied/audio/transcriptions",
                 post(|| async { (StatusCode::UNAUTHORIZED, r#"{"error":{"message":"Incorrect API key provided: sk-...abcd."}}"#) }),
             );
@@ -247,6 +270,20 @@ mod tests {
         let llm = OpenAiCompat::new(format!("{base}/filter"), KEY.into(), "m".into(), true);
         let msg = llm.complete_json(&[]).await.unwrap_err().to_string();
         assert!(msg.contains("content filter"), "{msg}");
+    }
+
+    /// Privacy guard: with routing, a chat request names the allowed providers and forbids fallback;
+    /// without it, no `provider` field is sent.
+    #[tokio::test]
+    async fn chat_routing_is_sent_only_when_set() {
+        let base = serve().await;
+        let llm = OpenAiCompat::new(format!("{base}/echo"), KEY.into(), "m".into(), true);
+        assert_eq!(llm.complete_json(&[]).await.unwrap(), "null");
+        let routed = llm.with_routing(&["azure".to_string()]);
+        let seen: Value = serde_json::from_str(&routed.complete_json(&[]).await.unwrap()).unwrap();
+        assert_eq!(seen["only"], json!(["azure"]));
+        assert_eq!(seen["allow_fallbacks"], json!(false));
+        assert_eq!(seen["require_parameters"], json!(true));
     }
 
     #[tokio::test]

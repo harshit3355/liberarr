@@ -3,6 +3,7 @@ use liberarr_core::ai::{Capability, Provider, Step, Timestamps};
 use rust_i18n::t;
 
 const OPENAI_URL: &str = "https://api.openai.com/v1";
+const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1";
 
 /// `(default base URL, default model)`. Summary models have no default: they change too fast.
 pub fn defaults(p: Provider, step: Step) -> (Option<&'static str>, Option<&'static str>) {
@@ -16,6 +17,7 @@ pub fn defaults(p: Provider, step: Step) -> (Option<&'static str>, Option<&'stat
             Some("voxtral-mini-transcribe-3"),
         ),
         (Provider::Mistral, Step::Summarize) => (Some("https://api.mistral.ai/v1"), None),
+        (Provider::OpenRouter, _) => (Some(OPENROUTER_URL), None),
         (Provider::Claude, Step::Summarize) => (None, Some("sonnet")),
         (Provider::Anthropic | Provider::Claude, _) => (Some("https://api.anthropic.com"), None),
     }
