@@ -52,6 +52,7 @@ Everything lives in `LIBERARR_HOME` (default `~/.liberarr`): `.env`, `liberarr.d
 Two profiles in `.env`, each with its own `BASE_URL`, `API_KEY` and `MODEL`: `LIBERARR_TRANSCRIBE_*` (speech to text) and `LIBERARR_LLM_*` (summary). Any OpenAI-compatible endpoint works:
 
 - **OpenAI, Groq or Gemini**: use their OpenAI-compatible base URL.
+- **Transcription** needs a model that returns `response_format=verbose_json`: OpenAI `whisper-1` or Groq Whisper models. OpenAI `gpt-4o-transcribe` / `gpt-4o-mini-transcribe` are not supported in v2.
 - **Claude**: through an OpenAI-compatible gateway (for example LiteLLM). For the **summary only**: Claude does not transcribe audio, so keep a speech-to-text provider on the transcribe profile.
 
 Transcription forces no language, so French mixed with English works. Summaries are in French. Audio above 25 MB is split without ffmpeg only for Ogg (the device format); other formats above 25 MB are refused.
