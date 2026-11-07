@@ -1,0 +1,297 @@
+//! Exports context: one-way Obsidian note rendering and marker-bounded upsert.
+use crate::recordings::{Recording, RecordingRepo};
+use crate::summaries::{MeetingSummary, SummaryRepo};
+use crate::transcription::{Transcript, TranscriptRepo, timestamp};
+use crate::{Error, Result};
+use jiff::tz::TimeZone;
+use std::path::{Path, PathBuf};
+
+/// Liberarr owns only the text between these markers; the owner's edits around them are never touched.
+pub const START: &str = "%% liberarr:start %%";
+pub const END: &str = "%% liberarr:end %%";
+
+fn local(r: &Recording, tz: &TimeZone) -> jiff::Zoned {
+    r.created_at.to_zoned(tz.clone())
+}
+
+/// `YYYY-MM-DD HHmm - <title>.md` in local time, with path-unsafe characters removed.
+pub fn note_filename(r: &Recording, title: &str, tz: &TimeZone) -> String {
+    let stamp = local(r, tz).strftime("%Y-%m-%d %H%M");
+    let safe: String = title
+        .chars()
+        .filter(|c| !"/\\:*?\"<>|".contains(*c))
+        .collect();
+    let safe = safe.trim();
+    if safe.is_empty() {
+        format!("{stamp} - recording {}.md", r.id)
+    } else {
+        format!("{stamp} - {safe}.md")
+    }
+}
+
+pub fn frontmatter(r: &Recording, tz: &TimeZone) -> String {
+    format!(
+        "---\ndate: {}\ntype: meeting\nsource: {}\nliberarr_id: {}\ntags: [liberarr]\n---",
+        local(r, tz).strftime("%Y-%m-%d"),
+        r.source.as_str(),
+        r.id
+    )
+}
+
+pub fn render_block(t: &Transcript, s: &MeetingSummary) -> String {
+    let actions: Vec<String> = s
+        .actions
+        .iter()
+        .map(|a| {
+            let parts: Vec<&str> = [
+                Some(a.action.as_str()),
+                a.owner.as_deref(),
+                a.due.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            format!(
+                "- [{}] {}",
+                if a.done { "x" } else { " " },
+                parts.join(" — ")
+            )
+        })
+        .collect();
+    let transcript: Vec<String> = if t.has_timestamps {
+        t.segments
+            .iter()
+            .map(|g| format!("[{}] {}", timestamp(g.start), g.text.trim()))
+            .collect()
+    } else {
+        vec![t.text.clone()]
+    };
+    let mut lines = vec![
+        START.to_string(),
+        "## Résumé".into(),
+        s.summary_md.trim().into(),
+        String::new(),
+        "## Carte mentale".into(),
+        "```mermaid".into(),
+        s.mindmap.trim().into(),
+        "```".into(),
+        String::new(),
+        "## Actions".into(),
+    ];
+    lines.extend(if actions.is_empty() {
+        vec!["_Aucune action._".to_string()]
+    } else {
+        actions
+    });
+    lines.extend([String::new(), "## Transcription".into()]);
+    lines.extend(transcript);
+    lines.push(END.into());
+    lines.join("\n")
+}
+
+/// Replaces the block between the last START that has an END after it; text outside is kept byte
+/// for byte. With no such pair (new note, or the owner deleted an END) the block is appended, so an
+/// orphan START and the text after it survive.
+pub fn upsert_block(existing: Option<&str>, block: &str, front: &str) -> String {
+    let Some(existing) = existing else {
+        return format!("{front}\n{block}\n");
+    };
+    if let Some(start) = existing.rfind(START)
+        && let Some(end) = existing[start..].find(END)
+    {
+        return format!(
+            "{}{}{}",
+            &existing[..start],
+            block,
+            &existing[start + end + END.len()..]
+        );
+    }
+    format!("{}\n\n{}\n", existing.trim_end_matches('\n'), block)
+}
+
+pub trait NoteStore {
+    fn read(&self, path: &Path) -> Result<Option<String>>;
+    /// Writes to a temp file and renames, so a crash never leaves a half-written note.
+    fn write_atomic(&self, path: &Path, text: &str) -> Result<()>;
+}
+
+pub struct ExportToObsidian<'a, R, T, S, N> {
+    pub recordings: &'a R,
+    pub transcripts: &'a T,
+    pub summaries: &'a S,
+    pub notes: &'a N,
+    pub vault: PathBuf,
+    pub tz: TimeZone,
+}
+
+impl<R: RecordingRepo, T: TranscriptRepo, S: SummaryRepo, N: NoteStore>
+    ExportToObsidian<'_, R, T, S, N>
+{
+    /// Writes the note and returns its path. The path is fixed on the first export (` (<id>)` is
+    /// added when the name is taken), so later exports rewrite the same note.
+    pub async fn run(&self, recording_id: i64) -> Result<PathBuf> {
+        let rec = self
+            .recordings
+            .get(recording_id)
+            .await?
+            .ok_or_else(|| Error::NotFound("recording".into()))?;
+        let t = self
+            .transcripts
+            .get(recording_id)
+            .await?
+            .ok_or_else(|| Error::NotFound("transcript".into()))?;
+        let s = self
+            .summaries
+            .get(recording_id)
+            .await?
+            .ok_or_else(|| Error::NotFound("summary".into()))?;
+        let path = match rec.export_path.clone() {
+            Some(p) => p,
+            None => {
+                let name = note_filename(&rec, &s.title, &self.tz);
+                let mut path = self.vault.join(&name);
+                if self.notes.read(&path)?.is_some() {
+                    path = self.vault.join(format!(
+                        "{} ({}).md",
+                        name.strip_suffix(".md").unwrap_or(&name),
+                        rec.id
+                    ));
+                }
+                // Fixed before writing: a crash in between retries the same path, never a second note.
+                self.recordings.set_export_path(rec.id, &path).await?;
+                path
+            }
+        };
+        let text = upsert_block(
+            self.notes.read(&path)?.as_deref(),
+            &render_block(&t, &s),
+            &frontmatter(&rec, &self.tz),
+        );
+        self.notes.write_atomic(&path, &text)?;
+        Ok(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fakes::{MemNotes, MemRecordings, MemSummaries, MemTranscripts, block_on};
+    use crate::recordings::{NewRecording, RecordingRepo, Source};
+    use crate::summaries::{MeetingSummary, SummaryRepo};
+    use crate::transcription::{Segment, Transcript, TranscriptRepo};
+    use jiff::tz::TimeZone;
+
+    fn transcript() -> Transcript {
+        Transcript {
+            engine: "e".into(),
+            language: None,
+            text: "salut".into(),
+            segments: vec![Segment {
+                start: 65.0,
+                end: 70.0,
+                text: "salut".into(),
+            }],
+            has_timestamps: true,
+        }
+    }
+
+    fn summary() -> MeetingSummary {
+        MeetingSummary {
+            title: "Point hebdo".into(),
+            summary_md: "## Contexte".into(),
+            mindmap: "mindmap\n  root".into(),
+            actions: vec![],
+        }
+    }
+
+    fn new_rec(created_at: &str) -> NewRecording {
+        NewRecording {
+            title: None,
+            source: Source::File,
+            source_ref: created_at.into(),
+            audio_path: "/a.ogg".into(),
+            duration_s: None,
+            created_at: created_at.parse().unwrap(),
+        }
+    }
+
+    #[test]
+    fn upsert_preserves_outside_text() {
+        let first = upsert_block(
+            None,
+            "%% liberarr:start %%\nv1\n%% liberarr:end %%",
+            "---\nfm\n---",
+        );
+        let edited = format!("{}\nmy own notes é\n", first.replace("v1", "v1 kept"));
+        let owner_text = "\nmy own notes é\n";
+        let out = upsert_block(
+            Some(&edited),
+            "%% liberarr:start %%\nv2\n%% liberarr:end %%",
+            "ignored",
+        );
+        assert!(out.ends_with(owner_text));
+        assert_eq!(out, edited.replace("v1 kept", "v2"));
+    }
+
+    #[test]
+    fn upsert_orphan_start_keeps_owner_text() {
+        let existing = "intro\n%% liberarr:start %%\nowner wrote this, deleted the end marker\n";
+        let block = "%% liberarr:start %%\nv1\n%% liberarr:end %%";
+        let once = upsert_block(Some(existing), block, "");
+        let twice = upsert_block(Some(&once), &block.replace("v1", "v2"), "");
+        assert!(twice.starts_with(existing.trim_end_matches('\n')));
+        assert!(twice.contains("owner wrote this, deleted the end marker"));
+        assert!(twice.contains("v2") && !twice.contains("v1"));
+        assert_eq!(twice.matches(END).count(), 1);
+    }
+
+    #[test]
+    fn note_filename_uses_local_time() {
+        let rec = Recording {
+            id: 1,
+            title: None,
+            source: Source::File,
+            source_ref: "r".into(),
+            audio_path: "/a.ogg".into(),
+            duration_s: None,
+            created_at: "2026-06-02T14:05:00Z".parse().unwrap(),
+            export_path: None,
+        };
+        let paris = TimeZone::get("Europe/Paris").unwrap();
+        assert_eq!(
+            note_filename(&rec, "Point/hebdo: \"v2\"?", &paris),
+            "2026-06-02 1605 - Pointhebdo v2.md"
+        );
+    }
+
+    #[test]
+    fn export_same_name_gets_distinct_path() {
+        let recs = MemRecordings::default();
+        let (transcripts, summaries, notes) = (
+            MemTranscripts::default(),
+            MemSummaries::default(),
+            MemNotes::default(),
+        );
+        for _ in 0..2 {
+            let id = block_on(recs.add(new_rec("2026-06-02T14:05:00Z"))).unwrap();
+            block_on(transcripts.save(id, &transcript())).unwrap();
+            block_on(summaries.save(id, &summary())).unwrap();
+        }
+        let uc = ExportToObsidian {
+            recordings: &recs,
+            transcripts: &transcripts,
+            summaries: &summaries,
+            notes: &notes,
+            vault: "/vault".into(),
+            tz: TimeZone::UTC,
+        };
+        let a = block_on(uc.run(1)).unwrap();
+        let b = block_on(uc.run(2)).unwrap();
+        assert_ne!(a, b);
+        assert!(b.to_string_lossy().ends_with(" (2).md"));
+        // The path is fixed on the first export: re-running rewrites the same note.
+        assert_eq!(block_on(uc.run(1)).unwrap(), a);
+        assert_eq!(notes.0.borrow().len(), 2);
+        assert_eq!(recs.0.borrow()[0].export_path.as_deref(), Some(a.as_path()));
+    }
+}

@@ -9,4 +9,9 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+jiff.workspace = true
+thiserror.workspace = true
+# serde only validates untrusted LLM output (AGENTS.md exception).
+serde.workspace = true
+serde_json.workspace = true
 
