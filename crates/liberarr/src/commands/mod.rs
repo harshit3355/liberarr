@@ -32,13 +32,14 @@ pub fn ask(prompt: &str, hidden: bool) -> std::io::Result<String> {
     Ok(line.trim().to_string())
 }
 
-/// Runs the queue to the end, then prints where each of `ids` stands. `false` if one failed.
+/// Runs the queue to the end (also work left by an earlier `pull --no-process`), then prints
+/// where each of `ids` stands. `false` if one failed.
 pub async fn process_and_report(app: &App, ids: &[i64]) -> Result<bool, liberarr_core::Error> {
+    eprintln!("Traitement (transcription, résumé, export)…");
+    app.drain().await?;
     if ids.is_empty() {
         return Ok(true);
     }
-    eprintln!("Traitement (transcription, résumé, export)…");
-    app.drain().await?;
     let mut ok = true;
     for &id in ids {
         match app.db.list_for(id).await?.last() {
