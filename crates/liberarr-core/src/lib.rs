@@ -170,6 +170,7 @@ mod fakes {
                     status: r.status,
                     attempts: r.job.attempts,
                     error: r.error.clone(),
+                    updated_at: jiff::Timestamp::UNIX_EPOCH,
                 })
                 .collect())
         }

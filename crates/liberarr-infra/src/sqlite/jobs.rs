@@ -1,5 +1,5 @@
 //! `JobQueue` on SQLite. Claims are atomic across processes.
-use super::{Db, now, storage, write_tx};
+use super::{Db, now, parse_ts, storage, write_tx};
 use liberarr_core::jobs::{Job, JobInfo, JobQueue, JobStatus};
 use liberarr_core::{Error, Result};
 use rusqlite::{OptionalExtension, params};
@@ -149,7 +149,7 @@ impl JobQueue for Db {
     async fn list_for(&self, recording_id: i64) -> Result<Vec<JobInfo>> {
         self.run(move |c| {
             let mut stmt = c.prepare(
-                "SELECT id, step, status, attempts, error FROM jobs WHERE recording_id = ?1 ORDER BY id",
+                "SELECT id, step, status, attempts, error, updated_at FROM jobs WHERE recording_id = ?1 ORDER BY id",
             )?;
             stmt.query_map([recording_id], |r| {
                 Ok(JobInfo {
@@ -158,6 +158,7 @@ impl JobQueue for Db {
                     status: parse_status(&r.get::<_, String>(2)?)?,
                     attempts: r.get(3)?,
                     error: r.get(4)?,
+                    updated_at: parse_ts(5, &r.get::<_, String>(5)?)?,
                 })
             })?
             .collect()

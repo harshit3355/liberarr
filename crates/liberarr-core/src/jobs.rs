@@ -33,6 +33,7 @@ pub struct JobInfo {
     pub status: JobStatus,
     pub attempts: u32,
     pub error: Option<String>,
+    pub updated_at: jiff::Timestamp,
 }
 
 pub trait JobQueue {
