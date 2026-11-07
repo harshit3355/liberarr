@@ -15,6 +15,7 @@ LIBERARR_LLM_PROVIDER=anthropic
 LIBERARR_LLM_BASE_URL=https://api.anthropic.com
 LIBERARR_LLM_API_KEY=stored-llm-key
 LIBERARR_LLM_MODEL=claude-sonnet-5-5
+LIBERARR_CONTENT_LANGUAGE=fr
 ";
 const SECRETS: [&str; 3] = [
     "LIBERARR_SECRET_KEY",
@@ -29,6 +30,8 @@ struct Fake {
     choices: VecDeque<Picked>,
     secrets: VecDeque<&'static str>,
     confirms: VecDeque<bool>,
+    /// `choose` fails as a closed stdin does.
+    closed: bool,
     seen: Vec<String>,
 }
 
@@ -40,6 +43,9 @@ impl Prompter for Fake {
         self.seen.push(q.to_string());
         self.seen
             .extend(o.iter().map(|c| format!("{} {}", c.value, c.note)));
+        if self.closed {
+            return Err(std::io::ErrorKind::UnexpectedEof.into());
+        }
         Ok(self.choices.pop_front().expect("unexpected choice"))
     }
     fn text(&mut self, q: &str, d: Option<&str>) -> std::io::Result<String> {
@@ -80,7 +86,7 @@ fn set_values_are_never_overwritten_or_re_asked() {
     let env = parse_env(&partial);
     let mut p = Fake::default();
     p.choices.push_back(Picked::Text("my-model".into()));
-    let plan = run_setup(&mut p, &env, &ok).unwrap();
+    let plan = run_setup(&mut p, &env, Language::En, &ok).unwrap();
     assert_eq!(
         plan.updates,
         [("LIBERARR_LLM_MODEL", "my-model".to_string())]
@@ -100,10 +106,11 @@ fn reconfigure_keeps_the_secrets_and_never_shows_a_secret() {
         Picked::Option(0),
         Picked::Option(0),
         Picked::Text("gpt-custom".into()),
+        Picked::Option(0),
     ]);
     p.confirms.push_back(false);
     p.secrets.push_back(TYPED_KEY);
-    let plan = run_setup(&mut p, &env, &ok).unwrap();
+    let plan = run_setup(&mut p, &env, Language::En, &ok).unwrap();
 
     let out = written(&plan);
     for k in SECRETS {
@@ -114,6 +121,7 @@ fn reconfigure_keeps_the_secrets_and_never_shows_a_secret() {
     assert_eq!(out["LIBERARR_LLM_PROVIDER"], "openai");
     assert_eq!(out["LIBERARR_LLM_API_KEY"], TYPED_KEY);
     assert_eq!(out["LIBERARR_LLM_MODEL"], "gpt-custom");
+    assert_eq!(out["LIBERARR_CONTENT_LANGUAGE"], "en");
     assert!(plan.password.is_none());
 
     // Nothing the front-end was shown contains a secret, stored or typed.
@@ -128,4 +136,18 @@ fn reconfigure_keeps_the_secrets_and_never_shows_a_secret() {
     ] {
         assert!(!seen.contains(secret), "{secret} reached the front-end");
     }
+}
+
+#[test]
+fn closed_stdin_takes_the_default_content_language() {
+    let env = parse_env(&ENV.replace("LIBERARR_CONTENT_LANGUAGE=fr\n", ""));
+    let mut p = Fake {
+        closed: true,
+        ..Fake::default()
+    };
+    let plan = run_setup(&mut p, &env, Language::En, &ok).unwrap();
+    assert_eq!(
+        plan.updates,
+        [("LIBERARR_CONTENT_LANGUAGE", "en".to_string())]
+    );
 }

@@ -15,6 +15,7 @@ pub use plain::PlainPrompter;
 use crate::config::is_unset;
 use crate::{models, providers};
 use liberarr_core::ai::{Provider, Step, capability, supports};
+use liberarr_core::lang::Language;
 use rust_i18n::t;
 use std::collections::HashMap;
 
@@ -187,10 +188,12 @@ pub(crate) fn current_provider(
 pub fn run_setup(
     p: &mut dyn Prompter,
     env: &HashMap<String, String>,
+    ui: Language,
     check: &Checker,
 ) -> SetupResult<Plan> {
     let mut plan = secrets(env)?;
-    plan.updates.extend(configure(p, env, Mode::Fill, check)?);
+    plan.updates
+        .extend(configure(p, env, Mode::Fill, ui, check)?);
     if plan.updates.is_empty() && p.is_interactive() {
         let options = [
             Choice {
@@ -203,7 +206,7 @@ pub fn run_setup(
             },
         ];
         if let Picked::Option(1) = p.choose(&t!("setup.existing"), &options, Some(0))? {
-            plan.updates = configure(p, env, Mode::Reconfigure, check)?;
+            plan.updates = configure(p, env, Mode::Reconfigure, ui, check)?;
         }
     }
     Ok(plan)
@@ -220,6 +223,7 @@ fn configure(
     p: &mut dyn Prompter,
     env: &HashMap<String, String>,
     mode: Mode,
+    ui: Language,
     check: &Checker,
 ) -> SetupResult<Updates> {
     let reconf = mode == Mode::Reconfigure;
@@ -294,7 +298,53 @@ fn configure(
             set(&mut updates, env, model_var, model);
         }
     }
+    // Asked once: left unset, the notes would change language with the OS locale.
+    if reconf || current(env, CONTENT_LANGUAGE).is_none() {
+        let known = current(env, CONTENT_LANGUAGE).and_then(|v| Language::parse(&v));
+        let chosen = ask_content_language(p, ui, known)?;
+        set(
+            &mut updates,
+            env,
+            CONTENT_LANGUAGE,
+            chosen.as_str().to_string(),
+        );
+    }
     Ok(updates)
+}
+
+pub(crate) const CONTENT_LANGUAGE: &str = "LIBERARR_CONTENT_LANGUAGE";
+
+/// Language of the summaries and the note headings; defaults to the current value, else the UI's.
+fn ask_content_language(
+    p: &mut dyn Prompter,
+    ui: Language,
+    known: Option<Language>,
+) -> SetupResult<Language> {
+    let all = [Language::En, Language::Fr];
+    let choices: Vec<Choice> = all
+        .iter()
+        .map(|l| Choice {
+            value: l.as_str().to_string(),
+            note: String::new(),
+        })
+        .collect();
+    let default = all.iter().position(|l| *l == known.unwrap_or(ui));
+    loop {
+        let picked = match p.choose(&t!("setup.content_language"), &choices, default) {
+            // Closed stdin (a provisioning script): no one can answer, take the default.
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                return Ok(known.unwrap_or(ui));
+            }
+            r => r?,
+        };
+        match picked {
+            Picked::Option(i) => return Ok(all[i]),
+            Picked::Text(t) => match Language::parse(&t) {
+                Some(l) => return Ok(l),
+                None => p.warn(&t!("setup.language_invalid")),
+            },
+        }
+    }
 }
 
 fn ask_provider(

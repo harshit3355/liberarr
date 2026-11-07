@@ -7,16 +7,9 @@ import fr from './locales/fr.json'
 fr satisfies typeof en
 
 const SUPPORTED = ['en', 'fr']
-const LANG_KEY = 'liberarr.lang'
 
-/** Stored override, else the first supported browser language, else English. */
+/** The first supported browser language, else English. */
 function initialLanguage(): string {
-  try {
-    const stored = localStorage.getItem(LANG_KEY)
-    if (stored && SUPPORTED.includes(stored)) return stored
-  } catch {
-    // Storage blocked: fall through to the browser language.
-  }
   for (const tag of navigator.languages) {
     const primary = tag.split('-')[0].toLowerCase()
     if (SUPPORTED.includes(primary)) return primary

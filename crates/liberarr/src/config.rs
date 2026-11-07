@@ -27,6 +27,8 @@ pub struct Config {
     pub obsidian: PathBuf,
     /// Language of the summary and of the note headings.
     pub content_language: Language,
+    /// `LIBERARR_CONTENT_LANGUAGE` is in the `.env`: otherwise the language follows the UI's.
+    pub content_language_set: bool,
     /// Set the `Secure` cookie flag (serving behind HTTPS).
     pub cookie_secure: bool,
 }
@@ -73,9 +75,8 @@ pub fn load(home: &Path) -> Result<Config, String> {
         }
         Err(e) => return Err(t!("config.env_unreadable", kind = e.kind()).into_owned()),
     };
-    load_from(home, crate::i18n::ui_language(home), |k| {
-        file.get(k).cloned()
-    })
+    let ui = crate::i18n::language(file.get("LIBERARR_LANG").map(String::as_str));
+    load_from(home, ui, |k| file.get(k).cloned())
 }
 
 fn load_from(
@@ -125,7 +126,9 @@ fn load_from(
             model,
         })
     };
-    let content_language = match get("LIBERARR_CONTENT_LANGUAGE").filter(|v| !v.trim().is_empty()) {
+    let configured = get("LIBERARR_CONTENT_LANGUAGE").filter(|v| !v.trim().is_empty());
+    let content_language_set = configured.is_some();
+    let content_language = match configured {
         None => ui,
         Some(v) => Language::parse(v.trim())
             .ok_or_else(|| t!("config.content_language_unknown").into_owned())?,
@@ -141,6 +144,7 @@ fn load_from(
             .filter(|v| !is_unset(v))
             .map_or_else(|| home.join("obsidian"), PathBuf::from),
         content_language,
+        content_language_set,
         cookie_secure: get("LIBERARR_COOKIE_SECURE").is_some_and(|v| v.trim() == "true"),
     })
 }

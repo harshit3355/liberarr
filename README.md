@@ -46,6 +46,8 @@ Everything lives in `LIBERARR_HOME` (default `~/.liberarr`): `.env`, `liberarr.d
 - Optional settings, not written by `init` (add them to `.env`):
   - `LIBERARR_OBSIDIAN_DIR`: folder (for example a vault) for the Obsidian export; default `<LIBERARR_HOME>/obsidian`. The export is one-way and only writes between `%% liberarr:start %%` and `%% liberarr:end %%`.
   - `LIBERARR_COOKIE_SECURE=true`: set the `Secure` flag on the login cookie when serving over HTTPS.
+  - `LIBERARR_LANG`: language of the CLI messages (`en` or `fr`); default: the OS locale.
+- `LIBERARR_CONTENT_LANGUAGE` (`en` or `fr`): language of the summaries and note headings. `init` asks for it and writes it, so notes keep one language whatever the locale.
 
 ## AI providers
 

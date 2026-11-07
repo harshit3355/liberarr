@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 pub async fn run(app: &App, files: &[PathBuf]) -> Outcome {
+    super::note_content_language(&app.cfg);
     // Once, before any claim: requeues jobs of a dead process and marks this one as a worker.
     app.db.reset_stale().await?;
     let (mut ids, mut ok) = (Vec::new(), true);

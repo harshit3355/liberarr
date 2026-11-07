@@ -82,6 +82,7 @@ impl<S: DeviceSession> DeviceSession for ProgressSession<S> {
 }
 
 pub async fn run(app: &App, no_process: bool) -> Outcome {
+    super::note_content_language(&app.cfg);
     if !no_process {
         // Once, before any claim: requeues jobs of a dead process and marks this one as a worker.
         app.db.reset_stale().await?;

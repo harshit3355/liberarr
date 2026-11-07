@@ -14,6 +14,19 @@ use std::io::{BufRead, IsTerminal, Write};
 
 pub type Outcome = Result<std::process::ExitCode, Box<dyn std::error::Error>>;
 
+/// One line when the notes' language is not pinned in the `.env`: it would follow the OS locale.
+pub fn note_content_language(cfg: &crate::config::Config) {
+    if !cfg.content_language_set {
+        eprintln!(
+            "{}",
+            t!(
+                "config.content_language_follows_ui",
+                language = cfg.content_language.as_str()
+            )
+        );
+    }
+}
+
 /// Reads one line. `hidden` input is not echoed on a terminal; piped input is read as is.
 pub fn ask(prompt: &str, hidden: bool) -> std::io::Result<String> {
     let line = if hidden && std::io::stdin().is_terminal() {

@@ -1,15 +1,19 @@
 //! `liberarr init --non-interactive`: the provider settings come from the process environment
 //! (`LIBERARR_{TRANSCRIBE,LLM}_{PROVIDER,BASE_URL,API_KEY,MODEL}`), never from the command line.
 //! Same rules as the questions: a value already set in the `.env` wins and is never overwritten.
-use super::{Plan, STEPS, SetupResult, current, current_provider, secrets, valid_url};
+use super::{
+    CONTENT_LANGUAGE, Plan, STEPS, SetupResult, current, current_provider, secrets, valid_url,
+};
 use crate::config::is_unset;
 use crate::providers;
 use liberarr_core::ai::{Provider, capability, supports};
+use liberarr_core::lang::Language;
 use rust_i18n::t;
 use std::collections::HashMap;
 
 pub fn from_env(
     existing: &HashMap<String, String>,
+    ui: Language,
     var: impl Fn(&str) -> Option<String>,
 ) -> SetupResult<Plan> {
     let mut plan = secrets(existing)?;
@@ -64,6 +68,16 @@ pub fn from_env(
             want(key_var, None)?;
         }
         want(model_var, default_model)?;
+    }
+    if current(existing, CONTENT_LANGUAGE).is_none() {
+        let lang = match from_env(CONTENT_LANGUAGE)? {
+            Some(v) => Language::parse(&v).ok_or_else(|| {
+                t!("setup.nonint_language_invalid", var = CONTENT_LANGUAGE).into_owned()
+            })?,
+            None => ui,
+        };
+        plan.updates
+            .push((CONTENT_LANGUAGE, lang.as_str().to_string()));
     }
     Ok(plan)
 }

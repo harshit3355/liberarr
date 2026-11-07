@@ -86,7 +86,7 @@ fn run(cmd: Cmd) -> commands::Outcome {
 fn main() -> ExitCode {
     let cmd = Cli::parse().cmd;
     // Once, before any message is printed.
-    let lang = config::home().map_or_else(|_| i18n::env_language(), |h| i18n::ui_language(&h));
+    let lang = config::home().map_or_else(|_| i18n::language(None), |h| i18n::ui_language(&h));
     rust_i18n::set_locale(lang.as_str());
     match run(cmd) {
         Ok(code) => code,

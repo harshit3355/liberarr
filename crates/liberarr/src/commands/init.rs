@@ -3,6 +3,7 @@
 //! The questions live in `setup`; this file reads and writes the `.env`.
 use super::Outcome;
 use crate::config::{self, parse_env};
+use crate::i18n;
 use crate::setup::{self, PlainPrompter};
 use rust_i18n::t;
 use std::io::Write;
@@ -48,11 +49,12 @@ pub fn run(non_interactive: bool) -> Outcome {
         }
     };
     let current = parse_env(&existing);
+    let ui = i18n::language(current.get("LIBERARR_LANG").map(String::as_str));
     let plan = if non_interactive {
-        setup::from_env(&current, |k| std::env::var(k).ok())?
+        setup::from_env(&current, ui, |k| std::env::var(k).ok())?
     } else {
         let rt = tokio::runtime::Runtime::new()?;
-        setup::run_setup(&mut PlainPrompter, &current, &|p, url, key| {
+        setup::run_setup(&mut PlainPrompter, &current, ui, &|p, url, key| {
             setup::connect(&rt, p, url, key)
         })?
     };

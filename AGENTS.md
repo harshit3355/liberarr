@@ -38,7 +38,7 @@ Dependency direction (checked by Cargo): `core` depends on no other workspace cr
 - CLI: clap. HTTP: axum. DB: SQLite via rusqlite (bundled). Device: btleplug (BLE). AI: reqwest, one adapter per provider.
 - UI: **Vite** + React + TypeScript, Tailwind, TanStack Query, Mermaid. Built to `web/dist` and embedded in the binary. Node is a contributor/CI build tool only, never a user prerequisite. Build order: `npm --prefix web ci && npm --prefix web run build`, then `cargo build --release`.
 - Transcription must handle **French with mixed English** in the same recording (multilingual models only, no forced language).
-- User-facing text (CLI, web UI, exported notes) is translatable. Supported languages: English (default) and French. The UI language follows `LIBERARR_LANG`, then the system or browser setting. The summary language and the note headings follow `LIBERARR_CONTENT_LANGUAGE` (default: the UI language). Text goes through message keys (`rust-i18n` in the binary, `i18next` in the web UI); `liberarr-core` takes a `Language` and has no i18n library; adapter and core error texts stay English.
+- User-facing text (CLI, web UI, exported notes) is translatable. Supported languages: English (default) and French. The CLI language follows `LIBERARR_LANG`, then the OS locale; the web UI follows the browser language. The summary language and the note headings follow `LIBERARR_CONTENT_LANGUAGE` (default: the UI language). Text goes through message keys (`rust-i18n` in the binary, `i18next` in the web UI); `liberarr-core` takes a `Language` and has no i18n library; adapter and core error texts stay English.
 - Local transcription and speaker identification (whisper-rs, sherpa-onnx) arrive in v3.
 
 ## Security & privacy
