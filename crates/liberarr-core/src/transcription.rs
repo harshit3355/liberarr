@@ -46,6 +46,10 @@ pub fn merge_chunks(results: Vec<(ChunkResult, f64)>, engine: &str) -> Transcrip
         .filter(|t| !t.is_empty())
         .collect::<Vec<_>>()
         .join(" ");
+    // Timestamps only when every chunk with text has segments, else the segment view drops text.
+    let all_timed = results
+        .iter()
+        .all(|(r, _)| !r.segments.is_empty() || r.text.trim().is_empty());
     let segments: Vec<Segment> = results
         .into_iter()
         .flat_map(|(r, offset)| {
@@ -60,7 +64,7 @@ pub fn merge_chunks(results: Vec<(ChunkResult, f64)>, engine: &str) -> Transcrip
         engine: engine.into(),
         language,
         text,
-        has_timestamps: !segments.is_empty(),
+        has_timestamps: all_timed && !segments.is_empty(),
         segments,
     }
 }
@@ -170,5 +174,23 @@ mod tests {
         assert!(!t.has_timestamps);
         assert!(t.segments.is_empty());
         assert_eq!(t.text, "bonjour tout le monde");
+    }
+
+    #[test]
+    fn one_chunk_without_segments_disables_timestamps() {
+        let with = ChunkResult {
+            language: None,
+            text: "a".into(),
+            segments: vec![seg(1.0, "a")],
+        };
+        let without = ChunkResult {
+            language: None,
+            text: "b".into(),
+            segments: vec![],
+        };
+        // Otherwise the UI and the note show segments only and "b" disappears.
+        let t = merge_chunks(vec![(with, 0.0), (without, 1200.0)], "whisper");
+        assert!(!t.has_timestamps);
+        assert_eq!(t.text, "a b");
     }
 }

@@ -14,12 +14,20 @@ fn local(r: &Recording, tz: &TimeZone) -> jiff::Zoned {
     r.created_at.to_zoned(tz.clone())
 }
 
-/// `YYYY-MM-DD HHmm - <title>.md` in local time, with path-unsafe characters removed.
+/// `YYYY-MM-DD HHmm - <title>.md` in local time, with path-unsafe and control characters removed.
 pub fn note_filename(r: &Recording, title: &str, tz: &TimeZone) -> String {
     let stamp = local(r, tz).strftime("%Y-%m-%d %H%M");
     let safe: String = title
         .chars()
-        .filter(|c| !"/\\:*?\"<>|".contains(*c))
+        .filter(|c| !"/\\:*?\"<>|".contains(*c) && (c.is_whitespace() || !c.is_control()))
+        .collect();
+    // One line (newlines and tabs become single spaces), capped at 100 characters.
+    let safe: String = safe
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(100)
         .collect();
     let safe = safe.trim();
     if safe.is_empty() {
@@ -287,6 +295,13 @@ mod tests {
             note_filename(&winter, "Point", &paris),
             "2026-01-15 1505 - Point.md"
         );
+        // LLM titles are untrusted: one line, bounded length, or the file write fails.
+        let long = format!("Ligne un\nligne\tdeux\r\x07 {}", "é".repeat(300));
+        let name = note_filename(&winter, &long, &paris);
+        let title = &name["2026-01-15 1505 - ".len()..name.len() - ".md".len()];
+        assert!(title.starts_with("Ligne un ligne deux éé"), "{title}");
+        assert!(!name.chars().any(char::is_control));
+        assert_eq!(title.chars().count(), 100);
     }
 
     #[test]
