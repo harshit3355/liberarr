@@ -10,7 +10,7 @@ A single Rust CLI, *arr-stack-inspired, that frees Plaud recordings from the ven
 
 1. **Liberarr is autonomous.** Its own DB and web UI are the source of truth. Obsidian, Plaud cloud, and any AI vendor are optional plug-ins, never hard dependencies.
 2. **Sources are pluggable** (like *arr indexers): direct device pull, local files, later others. The pipeline never knows where audio came from.
-3. **All AI calls go through one OpenAI-compatible client**, pointed at any OpenAI-compatible base URL (OpenAI, Groq, Gemini, or a gateway such as LiteLLM). No vendor SDKs in app code.
+3. **All AI calls go through provider adapters in `liberarr-infra`**, behind the core ports `Transcriber` and `Llm`. Each adapter speaks its provider's HTTP API directly. No vendor SDKs in app code. A generic OpenAI-compatible adapter stays available for gateways such as LiteLLM.
 4. **Pipeline steps are resumable jobs.** A failed step never deletes prior outputs. The original audio is stored untouched.
 5. **Never silently change a transcript.** LLM corrections are stored as `{original, corrected, reason}`; the raw transcript is always kept and viewable. *Applies when that step exists (v3+).*
 6. **Voiceprints never leave the machine.** Diarization, speaker embeddings and matching run locally only. Never send embeddings to any API.
@@ -35,7 +35,7 @@ Dependency direction (checked by Cargo): `core` depends on no other workspace cr
 ## Stack
 
 - Rust 1.95.0 (`rust-toolchain.toml`), edition 2024. Workspace lints: `unsafe_code = "forbid"`, clippy `unwrap_used = "warn"` (allowed in tests). CI runs `cargo fmt --check`, `clippy -D warnings`, `cargo test --workspace`, `cargo deny check advisories licenses`.
-- CLI: clap. HTTP: axum. DB: SQLite via rusqlite (bundled). Device: btleplug (BLE). AI: reqwest against an OpenAI-compatible endpoint.
+- CLI: clap. HTTP: axum. DB: SQLite via rusqlite (bundled). Device: btleplug (BLE). AI: reqwest, one adapter per provider.
 - UI: **Vite** + React + TypeScript, Tailwind, TanStack Query, Mermaid. Built to `web/dist` and embedded in the binary. Node is a contributor/CI build tool only, never a user prerequisite. Build order: `npm --prefix web ci && npm --prefix web run build`, then `cargo build --release`.
 - Transcription must handle **French with mixed English** in the same recording (multilingual models only, no forced language). Summaries default to French.
 - Local transcription and speaker identification (whisper-rs, sherpa-onnx) arrive in v3.

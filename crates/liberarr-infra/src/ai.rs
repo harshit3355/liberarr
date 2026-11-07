@@ -1,9 +1,9 @@
 //! OpenAI-compatible HTTP client: transcription and chat completions against any base URL.
 //! Errors carry the HTTP status and a short provider message, never bodies, audio, text or the key.
+use crate::http::{self, Auth};
 use liberarr_core::summaries::{ChatMessage, Llm};
 use liberarr_core::transcription::{ChunkResult, Segment, Transcriber};
 use liberarr_core::{Error, Result};
-use reqwest::StatusCode;
 use reqwest::multipart::{Form, Part};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -16,20 +16,22 @@ pub struct OpenAiCompat {
     base_url: String,
     api_key: String,
     model: String,
+    /// `verbose_json` (segments) or `json` (text only), for models that reject `verbose_json`.
+    ask_segments: bool,
     http: reqwest::Client,
 }
 
 impl OpenAiCompat {
-    pub fn new(base_url: String, api_key: String, model: String) -> Self {
+    pub fn new(base_url: String, api_key: String, model: String, ask_segments: bool) -> Self {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key,
             model,
-            http: reqwest::Client::new(),
+            ask_segments,
+            http: http::client(),
         }
     }
 
-    /// Sends the request, maps failures to `Error::Provider` and returns the parsed JSON reply.
     async fn send(
         &self,
         path: &str,
@@ -37,38 +39,7 @@ impl OpenAiCompat {
         req: impl FnOnce(reqwest::RequestBuilder) -> reqwest::RequestBuilder,
     ) -> Result<Value> {
         let url = format!("{}/{path}", self.base_url);
-        let res = req(self
-            .http
-            .post(url)
-            .bearer_auth(&self.api_key)
-            .timeout(timeout))
-        .send()
-        .await
-        .map_err(|e| Error::Provider(format!("request failed: {}", e.without_url())))?;
-        let status = res.status();
-        let body = res.text().await.map_err(|e| {
-            Error::Provider(format!(
-                "HTTP {status}: unreadable reply: {}",
-                e.without_url()
-            ))
-        })?;
-        let json: Option<Value> = serde_json::from_str(&body).ok();
-        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-            // Providers quote a masked key in these messages: keep only the status.
-            return Err(Error::Provider(format!(
-                "provider refused the API key (HTTP {status})"
-            )));
-        }
-        if !status.is_success() {
-            let msg = json
-                .as_ref()
-                .and_then(|j| j.pointer("/error/message")?.as_str())
-                .filter(|m| !m.to_lowercase().contains("key"))
-                .map(|m| format!(": {}", m.chars().take(200).collect::<String>()))
-                .unwrap_or_default();
-            return Err(Error::Provider(format!("HTTP {status}{msg}")));
-        }
-        json.ok_or_else(|| Error::Provider(format!("HTTP {status}: reply is not JSON")))
+        http::send(&self.http, &url, Auth::Bearer(&self.api_key), timeout, req).await
     }
 }
 
@@ -76,12 +47,53 @@ fn num(v: &Value, key: &str) -> Option<f64> {
     v.get(key)?.as_f64()
 }
 
+/// Reads `text`, `language` and the optional `segments` of a transcription reply.
+pub(crate) fn chunk_result(r: &Value) -> Result<ChunkResult> {
+    let text = r
+        .get("text")
+        .and_then(Value::as_str)
+        .ok_or_else(|| Error::Provider("reply has no `text`".into()))?;
+    // Segments are optional: some providers return plain text only.
+    let segments = r
+        .get("segments")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|s| {
+                    Some(Segment {
+                        start: num(s, "start")?,
+                        end: num(s, "end")?,
+                        text: s.get("text")?.as_str()?.to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(ChunkResult {
+        // `gpt-transcribe` replies with a `languages` array instead.
+        language: r
+            .get("language")
+            .or_else(|| r.pointer("/languages/0"))
+            .and_then(Value::as_str)
+            .map(String::from),
+        text: text.to_string(),
+        segments,
+    })
+}
+
 impl Transcriber for OpenAiCompat {
     async fn transcribe(&self, audio: &[u8], filename: &str) -> Result<ChunkResult> {
         // No `language`: recordings mix French and English.
         let form = Form::new()
             .text("model", self.model.clone())
-            .text("response_format", "verbose_json")
+            .text(
+                "response_format",
+                if self.ask_segments {
+                    "verbose_json"
+                } else {
+                    "json"
+                },
+            )
             .part(
                 "file",
                 Part::bytes(audio.to_vec()).file_name(filename.to_string()),
@@ -91,31 +103,7 @@ impl Transcriber for OpenAiCompat {
                 b.multipart(form)
             })
             .await?;
-        let text = r
-            .get("text")
-            .and_then(Value::as_str)
-            .ok_or_else(|| Error::Provider("reply has no `text`".into()))?;
-        // Segments are optional: some providers return plain text only.
-        let segments = r
-            .get("segments")
-            .and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(|s| {
-                        Some(Segment {
-                            start: num(s, "start")?,
-                            end: num(s, "end")?,
-                            text: s.get("text")?.as_str()?.to_string(),
-                        })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        Ok(ChunkResult {
-            language: r.get("language").and_then(Value::as_str).map(String::from),
-            text: text.to_string(),
-            segments,
-        })
+        chunk_result(&r)
     }
 
     fn engine(&self) -> &str {
@@ -136,6 +124,14 @@ impl Llm for OpenAiCompat {
                     .body(body.to_string())
             })
             .await?;
+        if r.pointer("/choices/0/finish_reason")
+            .and_then(Value::as_str)
+            == Some("content_filter")
+        {
+            return Err(Error::Provider(
+                "reply cut by the provider's content filter".into(),
+            ));
+        }
         r.pointer("/choices/0/message/content")
             .and_then(Value::as_str)
             .map(String::from)
@@ -187,6 +183,19 @@ mod tests {
                 post(|req: Request| transcription(req, r#"{"text":"Bonjour"}"#)),
             )
             .route(
+                "/html/audio/transcriptions",
+                post(|| async { (StatusCode::OK, "<html>oops</html>") }),
+            )
+            .route(
+                "/filter/chat/completions",
+                post(|| async {
+                    (
+                        StatusCode::OK,
+                        r#"{"choices":[{"finish_reason":"content_filter","message":{"content":"{\"half\":"}}]}"#,
+                    )
+                }),
+            )
+            .route(
                 "/denied/audio/transcriptions",
                 post(|| async { (StatusCode::UNAUTHORIZED, r#"{"error":{"message":"Incorrect API key provided: sk-...abcd."}}"#) }),
             );
@@ -199,8 +208,9 @@ mod tests {
     #[tokio::test]
     async fn transcribe_parses_verbose_json_and_missing_segments() {
         let base = serve().await;
-        let client =
-            |p: &str| OpenAiCompat::new(format!("{base}/{p}/"), KEY.into(), "whisper-1".into());
+        let client = |p: &str| {
+            OpenAiCompat::new(format!("{base}/{p}/"), KEY.into(), "whisper-1".into(), true)
+        };
 
         let r = client("seg")
             .transcribe(b"audio", "chunk-0.ogg")
@@ -229,5 +239,20 @@ mod tests {
         assert!(!err.to_string().contains("sk-...abcd"), "{err}");
         assert!(!err.to_string().contains(KEY));
         assert_eq!(client("seg").engine(), "whisper-1");
+    }
+
+    #[tokio::test]
+    async fn content_filter_cut_is_an_error() {
+        let base = serve().await;
+        let llm = OpenAiCompat::new(format!("{base}/filter"), KEY.into(), "m".into(), true);
+        let msg = llm.complete_json(&[]).await.unwrap_err().to_string();
+        assert!(msg.contains("content filter"), "{msg}");
+    }
+
+    #[tokio::test]
+    async fn non_json_reply_is_an_error_not_a_panic() {
+        let base = serve().await;
+        let t = OpenAiCompat::new(format!("{base}/html"), KEY.into(), "m".into(), true);
+        assert!(t.transcribe(b"audio", "chunk-0.ogg").await.is_err());
     }
 }

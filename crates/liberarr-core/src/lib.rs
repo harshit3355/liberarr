@@ -4,6 +4,7 @@
 //! unnameable `Send` bound is resolved at the composition root where the types are concrete.
 #![allow(async_fn_in_trait)]
 
+pub mod ai;
 pub mod audio;
 pub mod device;
 pub mod error;

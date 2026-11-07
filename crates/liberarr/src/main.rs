@@ -2,6 +2,7 @@
 mod commands;
 mod config;
 mod container;
+mod providers;
 
 use clap::{Parser, Subcommand};
 use std::net::IpAddr;

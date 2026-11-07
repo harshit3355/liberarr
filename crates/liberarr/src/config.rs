@@ -1,5 +1,6 @@
 //! `<LIBERARR_HOME>/.env` is the one source of secrets and settings (only `LIBERARR_HOME`, which
 //! locates it, comes from the environment). Errors name the variable, never its value.
+use liberarr_core::ai::{Provider, Step, capability, supports};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -8,6 +9,7 @@ pub const PLACEHOLDER: &str = "change-me";
 const MIN_SECRET: usize = 32;
 
 pub struct Profile {
+    pub provider: Provider,
     pub base_url: String,
     pub api_key: String,
     pub model: String,
@@ -90,11 +92,27 @@ fn load_from(home: &Path, get: impl Fn(&str) -> Option<String>) -> Result<Config
         }
         Ok(v)
     };
-    let profile = |p: &str| -> Result<Profile, String> {
+    let profile = |p: &str, step: Step| -> Result<Profile, String> {
+        let var = format!("LIBERARR_{p}_PROVIDER");
+        let provider = match get(&var).filter(|v| !v.trim().is_empty()) {
+            None => Provider::Compatible,
+            Some(v) => Provider::parse(v.trim()).ok_or_else(|| {
+                format!("{var} n'est pas reconnu (openai-compatible, openai, mistral, anthropic)")
+            })?,
+        };
+        let model = need(&format!("LIBERARR_{p}_MODEL"))?;
+        if !supports(capability(provider, &model), step) {
+            let verb = match step {
+                Step::Transcribe => "transcrire",
+                Step::Summarize => "résumer",
+            };
+            return Err(format!("{var} : ce fournisseur ne sait pas {verb}"));
+        }
         Ok(Profile {
+            provider,
             base_url: need(&format!("LIBERARR_{p}_BASE_URL"))?,
             api_key: need(&format!("LIBERARR_{p}_API_KEY"))?,
-            model: need(&format!("LIBERARR_{p}_MODEL"))?,
+            model,
         })
     };
     Ok(Config {
@@ -102,8 +120,8 @@ fn load_from(home: &Path, get: impl Fn(&str) -> Option<String>) -> Result<Config
         secret_key: secret("LIBERARR_SECRET_KEY")?,
         api_key: secret("LIBERARR_API_KEY")?,
         admin_password: need("LIBERARR_ADMIN_PASSWORD")?,
-        transcribe: profile("TRANSCRIBE")?,
-        llm: profile("LLM")?,
+        transcribe: profile("TRANSCRIBE", Step::Transcribe)?,
+        llm: profile("LLM", Step::Summarize)?,
         obsidian: get("LIBERARR_OBSIDIAN_DIR")
             .filter(|v| !is_unset(v))
             .map_or_else(|| home.join("obsidian"), PathBuf::from),
@@ -179,5 +197,18 @@ LIBERARR_LLM_MODEL=gpt
                 .err()
                 .is_some_and(|m| m.contains("LIBERARR_SECRET_KEY"))
         );
+    }
+
+    fn provider_line(key: &str, value: &str) -> String {
+        format!("{VALID}{key}={value}\n")
+    }
+
+    #[test]
+    fn claude_cannot_be_the_transcriber() {
+        let msg = load_text(&provider_line("LIBERARR_TRANSCRIBE_PROVIDER", "anthropic"))
+            .err()
+            .unwrap();
+        assert!(msg.contains("LIBERARR_TRANSCRIBE_PROVIDER"), "{msg}");
+        assert!(!msg.contains("sk-a"), "{msg}");
     }
 }
