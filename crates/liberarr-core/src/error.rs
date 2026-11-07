@@ -13,4 +13,6 @@ pub enum Error {
     Storage(String),
     #[error("provider: {0}")]
     Provider(String),
+    #[error("device: {0}")]
+    Device(String),
 }
