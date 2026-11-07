@@ -37,6 +37,7 @@ fn path_str(p: &Path) -> Result<String> {
 
 impl RecordingRepo for Db {
     async fn get(&self, id: i64) -> Result<Option<Recording>> {
+        let audio_dir = self.audio_dir.clone();
         self.run(move |c| {
             c.query_row(
                 "SELECT id, title, source, source_ref, audio_path, duration_s, created_at, export_path
@@ -48,7 +49,8 @@ impl RecordingRepo for Db {
                         title: r.get(1)?,
                         source: parse_source(2, &r.get::<_, String>(2)?)?,
                         source_ref: r.get(3)?,
-                        audio_path: PathBuf::from(r.get::<_, String>(4)?),
+                        // `join` keeps a legacy absolute value as it is.
+                        audio_path: audio_dir.join(r.get::<_, String>(4)?),
                         duration_s: r.get(5)?,
                         created_at: parse_ts(6, &r.get::<_, String>(6)?)?,
                         export_path: r.get::<_, Option<String>>(7)?.map(PathBuf::from),
@@ -74,7 +76,11 @@ impl RecordingRepo for Db {
     }
 
     async fn add(&self, new: NewRecording) -> Result<i64> {
-        let audio_path = path_str(&new.audio_path)?;
+        let audio_path = path_str(
+            new.audio_path
+                .strip_prefix(&self.audio_dir)
+                .unwrap_or(&new.audio_path),
+        )?;
         self.run(move |c| {
             c.execute(
                 "INSERT INTO recordings (title, source, source_ref, audio_path, duration_s, created_at)

@@ -21,13 +21,18 @@ pub fn note_filename(r: &Recording, title: &str, tz: &TimeZone) -> String {
         .chars()
         .filter(|c| !"/\\:*?\"<>|".contains(*c) && (c.is_whitespace() || !c.is_control()))
         .collect();
-    // One line (newlines and tabs become single spaces), capped at 100 characters.
+    // One line (newlines and tabs become single spaces), capped at 150 bytes on a char boundary:
+    // file systems limit a name to 255 bytes, and CJK/emoji titles are 3-4 bytes per character.
+    let mut bytes = 0;
     let safe: String = safe
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
         .chars()
-        .take(100)
+        .take_while(|c| {
+            bytes += c.len_utf8();
+            bytes <= 150
+        })
         .collect();
     let safe = safe.trim();
     if safe.is_empty() {
@@ -137,8 +142,9 @@ pub struct ExportToObsidian<'a, R, T, S, N> {
 impl<R: RecordingRepo, T: TranscriptRepo, S: SummaryRepo, N: NoteStore>
     ExportToObsidian<'_, R, T, S, N>
 {
-    /// Writes the note and returns its path. The path is fixed on the first export (` (<id>)` is
-    /// added when the name is taken), so later exports rewrite the same note.
+    /// Writes the note and returns its path. The file name is fixed on the first export (` (<id>)`
+    /// is added when the name is taken), so later exports rewrite the same note. Only the name is
+    /// stored: the vault can move without stranding old recordings.
     pub async fn run(&self, recording_id: i64) -> Result<PathBuf> {
         let rec = self
             .recordings
@@ -155,21 +161,23 @@ impl<R: RecordingRepo, T: TranscriptRepo, S: SummaryRepo, N: NoteStore>
             .get(recording_id)
             .await?
             .ok_or_else(|| Error::NotFound("summary".into()))?;
+        // `join` keeps a legacy absolute value working.
         let path = match rec.export_path.clone() {
-            Some(p) => p,
+            Some(name) => self.vault.join(name),
             None => {
-                let name = note_filename(&rec, &s.title, &self.tz);
-                let mut path = self.vault.join(&name);
-                if self.notes.read(&path)?.is_some() {
-                    path = self.vault.join(format!(
+                let mut name = note_filename(&rec, &s.title, &self.tz);
+                if self.notes.read(&self.vault.join(&name))?.is_some() {
+                    name = format!(
                         "{} ({}).md",
                         name.strip_suffix(".md").unwrap_or(&name),
                         rec.id
-                    ));
+                    );
                 }
-                // Fixed before writing: a crash in between retries the same path, never a second note.
-                self.recordings.set_export_path(rec.id, &path).await?;
-                path
+                // Fixed before writing: a crash in between retries the same name, never a second note.
+                self.recordings
+                    .set_export_path(rec.id, Path::new(&name))
+                    .await?;
+                self.vault.join(name)
             }
         };
         let text = upsert_block(
@@ -295,13 +303,22 @@ mod tests {
             note_filename(&winter, "Point", &paris),
             "2026-01-15 1505 - Point.md"
         );
-        // LLM titles are untrusted: one line, bounded length, or the file write fails.
+        // LLM titles are untrusted: one line, bounded in bytes (file systems cap names at 255 bytes).
         let long = format!("Ligne un\nligne\tdeux\r\x07 {}", "é".repeat(300));
         let name = note_filename(&winter, &long, &paris);
         let title = &name["2026-01-15 1505 - ".len()..name.len() - ".md".len()];
         assert!(title.starts_with("Ligne un ligne deux éé"), "{title}");
         assert!(!name.chars().any(char::is_control));
-        assert_eq!(title.chars().count(), 100);
+        assert!(name.len() <= 255, "{}", name.len());
+        for wide in ["😀".repeat(300), "会议纪要".repeat(100)] {
+            let name = note_filename(&winter, &wide, &paris);
+            // Room for the ` (<id>)` suffix added on a name clash.
+            assert!(
+                name.len() + " (9999999999).md".len() <= 255,
+                "{}",
+                name.len()
+            );
+        }
     }
 
     #[test]
@@ -332,6 +349,9 @@ mod tests {
         // The path is fixed on the first export: re-running rewrites the same note.
         assert_eq!(block_on(uc.run(1)).unwrap(), a);
         assert_eq!(notes.0.borrow().len(), 2);
-        assert_eq!(recs.0.borrow()[0].export_path.as_deref(), Some(a.as_path()));
+        assert_eq!(
+            recs.0.borrow()[0].export_path.as_deref(),
+            a.file_name().map(Path::new)
+        );
     }
 }

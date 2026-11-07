@@ -7,7 +7,7 @@ use liberarr_core::{Error, Result};
 use rusqlite::types::Type;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 use std::fs::{File, OpenOptions};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -33,6 +33,8 @@ pub struct Db {
     conn: Arc<Mutex<Connection>>,
     /// `<db>.workers`, held shared once `reset_stale` ran: marks this process as a live worker.
     workers: Arc<File>,
+    /// `<home>/audio`: recordings store their audio path relative to it, so the home can move.
+    audio_dir: PathBuf,
 }
 
 impl Db {
@@ -58,6 +60,8 @@ impl Db {
         Ok(Db {
             conn: Arc::new(Mutex::new(conn)),
             workers: Arc::new(workers),
+            // Same layout as the composition root (`<home>/liberarr.db`, `<home>/audio`).
+            audio_dir: path.parent().unwrap_or(Path::new("")).join("audio"),
         })
     }
 
@@ -129,6 +133,91 @@ mod tests {
             duration_s: Some(1.5),
             created_at: "2026-03-01T10:00:00Z".parse().unwrap(),
         }
+    }
+
+    /// AGENTS.md rule 9: copying or renaming `LIBERARR_HOME` must not strand old recordings.
+    #[tokio::test]
+    async fn recording_survives_home_move() {
+        use crate::files::{FsAudioStore, FsNoteStore};
+        use liberarr_core::exports::ExportToObsidian;
+        use liberarr_core::recordings::AudioStore;
+        use liberarr_core::summaries::{MeetingSummary, SummaryRepo};
+        use liberarr_core::transcription::{Segment, Transcript, TranscriptRepo};
+
+        let t = TempDb::new("move");
+        let (a, b) = (t.0.join("a"), t.0.join("b"));
+        std::fs::create_dir_all(&a).unwrap();
+        let src = t.0.join("in.ogg");
+        std::fs::write(&src, b"ogg").unwrap();
+
+        let db = Db::open(&a.join("liberarr.db")).unwrap();
+        let stored = FsAudioStore {
+            audio: a.join("audio"),
+        }
+        .store(&src, "fp")
+        .unwrap();
+        let mut new = new_rec("r");
+        new.audio_path = stored.path;
+        let id = db.add(new).await.unwrap();
+        TranscriptRepo::save(
+            &db,
+            id,
+            &Transcript {
+                engine: "e".into(),
+                language: None,
+                text: "salut".into(),
+                segments: vec![Segment {
+                    start: 0.0,
+                    end: 1.0,
+                    text: "salut".into(),
+                }],
+                has_timestamps: true,
+            },
+        )
+        .await
+        .unwrap();
+        SummaryRepo::save(
+            &db,
+            id,
+            &MeetingSummary {
+                title: "Point".into(),
+                summary_md: "x".into(),
+                mindmap: "mindmap\n  root".into(),
+                actions: vec![],
+            },
+        )
+        .await
+        .unwrap();
+        let export = |home: &Path, db: &Db| {
+            let db = db.clone();
+            let vault = home.join("obsidian");
+            async move {
+                ExportToObsidian {
+                    recordings: &db,
+                    transcripts: &db,
+                    summaries: &db,
+                    notes: &FsNoteStore,
+                    vault,
+                    tz: jiff::tz::TimeZone::UTC,
+                }
+                .run(id)
+                .await
+                .unwrap()
+            }
+        };
+        let first = export(&a, &db).await;
+        assert!(first.starts_with(&a));
+        drop(db);
+
+        // Move the whole home, as a Mac -> NAS copy would.
+        std::fs::rename(&a, &b).unwrap();
+        let db = Db::open(&b.join("liberarr.db")).unwrap();
+        let rec = RecordingRepo::get(&db, id).await.unwrap().unwrap();
+        assert!(rec.audio_path.starts_with(&b), "{:?}", rec.audio_path);
+        assert_eq!(std::fs::read(&rec.audio_path).unwrap(), b"ogg");
+        let second = export(&b, &db).await;
+        assert!(second.starts_with(&b), "{second:?}");
+        assert!(!a.exists(), "the old home must not be recreated");
     }
 
     #[tokio::test]
