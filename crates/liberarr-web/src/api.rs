@@ -77,11 +77,10 @@ pub async fn login<B: Backend>(
     Json(body): Json<Login>,
 ) -> Result<Response, ApiError> {
     let ip = peer.ip();
-    if s.auth.is_blocked(ip) {
+    if !s.auth.begin_attempt(ip) {
         return Err(ApiError(StatusCode::TOO_MANY_REQUESTS, "too many attempts"));
     }
     if !s.auth.credentials_ok(&body.username, &body.password) {
-        s.auth.record_failure(ip);
         return Err(UNAUTHORIZED);
     }
     s.auth.clear_failures(ip);
@@ -267,7 +266,17 @@ pub async fn rerun<B: Backend>(
         .find(|st| **st == body.step)
         .ok_or(ApiError(StatusCode::BAD_REQUEST, "unknown step"))?;
     s.backend.recording(id).await?.ok_or(NOT_FOUND)?;
-    s.backend.enqueue(id, step).await?;
+    // A double click, or a rerun while the pipeline runs, must not run the chain (AI calls) twice.
+    // shortcut: check-then-enqueue is not atomic; two simultaneous requests could both pass.
+    let busy = s
+        .backend
+        .jobs(id)
+        .await?
+        .iter()
+        .any(|j| matches!(j.status, JobStatus::Queued | JobStatus::Running));
+    if !busy {
+        s.backend.enqueue(id, step).await?;
+    }
     Ok(StatusCode::ACCEPTED)
 }
 
@@ -284,4 +293,20 @@ pub async fn toggle_action<B: Backend>(
     Ok(Json(
         s.backend.toggle_action(id, index, body.done).await?.actions,
     ))
+}
+
+pub async fn nosniff(mut res: Response) -> Response {
+    res.headers_mut().insert(
+        "x-content-type-options",
+        "nosniff".parse().expect("static value"),
+    );
+    res
+}
+
+pub async fn no_store(mut res: Response) -> Response {
+    res.headers_mut().insert(
+        header::CACHE_CONTROL,
+        "no-store".parse().expect("static value"),
+    );
+    res
 }

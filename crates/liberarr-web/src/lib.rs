@@ -8,7 +8,7 @@ pub mod assets;
 pub mod auth;
 
 use axum::Router;
-use axum::middleware::from_fn_with_state;
+use axum::middleware::{from_fn_with_state, map_response};
 use axum::routing::{get, patch, post};
 use liberarr_core::Result;
 use liberarr_core::jobs::JobInfo;
@@ -65,9 +65,9 @@ impl<B> Clone for AppState<B> {
 pub fn router<B: Backend>(state: AppState<B>) -> Router {
     let open = Router::new()
         .route("/health", get(api::health))
-        .route("/auth/login", post(api::login::<B>))
-        .route("/auth/logout", post(api::logout::<B>));
+        .route("/auth/login", post(api::login::<B>));
     let protected = Router::new()
+        .route("/auth/logout", post(api::logout::<B>))
         .route("/auth/me", get(api::me::<B>))
         .route("/recordings", get(api::list::<B>))
         .route("/recordings/{id}", get(api::detail::<B>))
@@ -79,8 +79,14 @@ pub fn router<B: Backend>(state: AppState<B>) -> Router {
         )
         .layer(from_fn_with_state(state.clone(), api::require_auth::<B>));
     Router::new()
-        .nest("/api", open.merge(protected).fallback(api::not_found))
+        .nest(
+            "/api",
+            open.merge(protected)
+                .fallback(api::not_found)
+                .layer(map_response(api::no_store)),
+        )
         .fallback(get(assets::spa))
+        .layer(map_response(api::nosniff))
         .with_state(state)
 }
 
@@ -90,11 +96,18 @@ mod tests {
     use axum::body::Body;
     use axum::extract::ConnectInfo;
     use axum::http::{Request, StatusCode, header};
+    use liberarr_core::jobs::JobStatus;
     use liberarr_core::recordings::{RecordingStatus, Source};
+    use liberarr_core::summaries::Action;
     use std::net::SocketAddr;
+    use std::sync::Mutex;
     use tower::ServiceExt;
 
-    struct Fake;
+    /// One recording (id 1) whose summary has a single action.
+    #[derive(Default)]
+    struct Fake {
+        jobs: Arc<Mutex<Vec<JobInfo>>>,
+    }
     impl Backend for Fake {
         async fn list(&self) -> Result<Vec<RecordingItem>> {
             Ok(vec![RecordingItem {
@@ -107,8 +120,17 @@ mod tests {
                 failed_step: None,
             }])
         }
-        async fn recording(&self, _: i64) -> Result<Option<Recording>> {
-            Ok(None)
+        async fn recording(&self, id: i64) -> Result<Option<Recording>> {
+            Ok((id == 1).then(|| Recording {
+                id,
+                title: None,
+                source: Source::File,
+                source_ref: "r".into(),
+                audio_path: "/nonexistent.ogg".into(),
+                duration_s: None,
+                created_at: jiff::Timestamp::UNIX_EPOCH,
+                export_path: None,
+            }))
         }
         async fn transcript(&self, _: i64) -> Result<Option<Transcript>> {
             Ok(None)
@@ -117,19 +139,47 @@ mod tests {
             Ok(None)
         }
         async fn jobs(&self, _: i64) -> Result<Vec<JobInfo>> {
-            Ok(vec![])
+            Ok(self.jobs.lock().expect("lock").clone())
         }
-        async fn enqueue(&self, _: i64, _: &str) -> Result<i64> {
-            Ok(1)
+        async fn enqueue(&self, _: i64, step: &str) -> Result<i64> {
+            let mut jobs = self.jobs.lock().expect("lock");
+            let id = jobs.len() as i64 + 1;
+            jobs.push(JobInfo {
+                id,
+                step: step.into(),
+                status: JobStatus::Queued,
+                attempts: 0,
+                error: None,
+                updated_at: jiff::Timestamp::UNIX_EPOCH,
+            });
+            Ok(id)
         }
-        async fn toggle_action(&self, _: i64, _: usize, _: bool) -> Result<MeetingSummary> {
-            Err(liberarr_core::Error::NotFound("summary".into()))
+        async fn toggle_action(&self, id: i64, index: usize, done: bool) -> Result<MeetingSummary> {
+            if id != 1 || index != 0 {
+                return Err(liberarr_core::Error::NotFound("action".into()));
+            }
+            Ok(MeetingSummary {
+                title: "t".into(),
+                summary_md: "s".into(),
+                mindmap: "mindmap".into(),
+                actions: vec![Action {
+                    action: "a".into(),
+                    owner: None,
+                    due: None,
+                    start: None,
+                    done,
+                }],
+            })
         }
     }
 
     fn app() -> Router {
+        app_with(Fake::default())
+    }
+
+    fn app_with(fake: Fake) -> Router {
         router(AppState::new(
-            Fake,
+            fake,
             AuthConfig {
                 username: "admin".into(),
                 password: "pw".into(),
@@ -196,16 +246,29 @@ mod tests {
             .to_str()
             .expect("cookie");
         assert!(set.contains("HttpOnly") && set.contains("SameSite=Lax"));
-        let mut r = req("GET", "/api/recordings", None, "");
-        r.headers_mut().insert(
-            header::COOKIE,
-            set.split(';')
-                .next()
-                .expect("pair")
-                .parse()
-                .expect("header"),
+        let cookie = set.split(';').next().expect("pair").to_owned();
+        let with_cookie = || {
+            let mut r = req("GET", "/api/recordings", None, "");
+            r.headers_mut()
+                .insert(header::COOKIE, cookie.parse().expect("header"));
+            r
+        };
+        assert_eq!(status(&app, with_cookie()).await, StatusCode::OK);
+        // Same secret, new admin password: the old session is revoked.
+        let rotated = router(AppState::new(
+            Fake::default(),
+            AuthConfig {
+                username: "admin".into(),
+                password: "changed".into(),
+                api_key: "key".into(),
+                secret_key: "secret".into(),
+                cookie_secure: false,
+            },
+        ));
+        assert_eq!(
+            status(&rotated, with_cookie()).await,
+            StatusCode::UNAUTHORIZED
         );
-        assert_eq!(status(&app, r).await, StatusCode::OK);
     }
 
     #[tokio::test]
@@ -237,16 +300,70 @@ mod tests {
             status(&app, req("GET", "/api/recordings", Some("wrong"), "")).await,
             StatusCode::UNAUTHORIZED
         );
-        // Unknown step is a 400 before anything is queued; a known one is accepted.
-        let rerun = |step: &str| {
+    }
+
+    fn rerun(id: i64, step: &str) -> Request<Body> {
+        req(
+            "POST",
+            &format!("/api/recordings/{id}/rerun"),
+            Some("key"),
+            &format!(r#"{{"step":"{step}"}}"#),
+        )
+    }
+
+    #[tokio::test]
+    async fn rerun_known_step_202_and_no_double_enqueue() {
+        let fake = Fake::default();
+        let jobs = Arc::clone(&fake.jobs);
+        let app = app_with(fake);
+        assert_eq!(
+            status(&app, rerun(1, "bogus")).await,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            status(&app, rerun(2, "summarize")).await,
+            StatusCode::NOT_FOUND
+        );
+        assert!(jobs.lock().expect("lock").is_empty());
+        assert_eq!(
+            status(&app, rerun(1, "summarize")).await,
+            StatusCode::ACCEPTED
+        );
+        // Still queued: a second click is accepted but queues nothing.
+        assert_eq!(
+            status(&app, rerun(1, "summarize")).await,
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(jobs.lock().expect("lock").len(), 1);
+        // Once the job is done, a rerun queues again.
+        jobs.lock().expect("lock")[0].status = JobStatus::Done;
+        assert_eq!(
+            status(&app, rerun(1, "summarize")).await,
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(jobs.lock().expect("lock").len(), 2);
+    }
+
+    #[tokio::test]
+    async fn patch_action_toggles_and_404_out_of_range() {
+        let app = app();
+        let patch = |id: i64, index: usize| {
             req(
-                "POST",
-                "/api/recordings/1/rerun",
+                "PATCH",
+                &format!("/api/recordings/{id}/actions/{index}"),
                 Some("key"),
-                &format!(r#"{{"step":"{step}"}}"#),
+                r#"{"done":true}"#,
             )
         };
-        assert_eq!(status(&app, rerun("bogus")).await, StatusCode::BAD_REQUEST);
+        let res = app.clone().oneshot(patch(1, 0)).await.expect("response");
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), 1 << 20)
+            .await
+            .expect("body");
+        let actions: serde_json::Value = serde_json::from_slice(&body).expect("json");
+        assert_eq!(actions[0]["done"], true);
+        assert_eq!(status(&app, patch(1, 5)).await, StatusCode::NOT_FOUND);
+        assert_eq!(status(&app, patch(2, 0)).await, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -257,6 +374,8 @@ mod tests {
             .expect("response");
         assert_eq!(res.status(), StatusCode::NOT_FOUND);
         assert_eq!(res.headers()[header::CONTENT_TYPE], "application/json");
+        assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
+        assert_eq!(res.headers()["x-content-type-options"], "nosniff");
     }
 
     #[tokio::test]
@@ -266,6 +385,7 @@ mod tests {
             .await
             .expect("response");
         assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(res.headers()["x-content-type-options"], "nosniff");
         let body = axum::body::to_bytes(res.into_body(), 1 << 20)
             .await
             .expect("body");

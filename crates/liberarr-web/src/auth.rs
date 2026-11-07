@@ -25,6 +25,8 @@ pub struct AuthConfig {
 pub struct Auth {
     cfg: AuthConfig,
     session_key: [u8; 32],
+    /// Part of every session MAC: changing the admin password revokes existing sessions.
+    password_hash: [u8; 32],
     // shortcut: per-process and keyed on the peer address, so behind a reverse proxy all clients
     // share one budget; upgrade to a trusted X-Forwarded-For if that matters.
     failures: Mutex<HashMap<IpAddr, (u32, Instant)>>,
@@ -46,6 +48,7 @@ impl Auth {
             .expand(b"liberarr session v1", &mut session_key)
             .expect("32 bytes is a valid HKDF-SHA256 output length");
         Self {
+            password_hash: Sha256::digest(&cfg.password).into(),
             cfg,
             session_key,
             failures: Mutex::default(),
@@ -55,6 +58,7 @@ impl Auth {
     fn tag(&self, expiry: i64) -> String {
         let mut mac = Hmac::<Sha256>::new_from_slice(&self.session_key).expect("any key length");
         mac.update(expiry.to_string().as_bytes());
+        mac.update(&self.password_hash);
         hex(&mac.finalize().into_bytes())
     }
 
@@ -114,16 +118,17 @@ impl Auth {
         ct_eq(tag, &self.tag(expiry)) && expiry > Self::now()
     }
 
-    pub fn is_blocked(&self, ip: IpAddr) -> bool {
-        let map = self.failures.lock().unwrap_or_else(|e| e.into_inner());
-        map.get(&ip)
-            .is_some_and(|(n, since)| *n >= MAX_FAILURES && since.elapsed() < WINDOW)
-    }
-
-    pub fn record_failure(&self, ip: IpAddr) {
+    /// Counts one login attempt for `ip` and says whether it may proceed. Check and count share
+    /// one lock, so a parallel burst cannot exceed the budget. A success calls `clear_failures`.
+    pub fn begin_attempt(&self, ip: IpAddr) -> bool {
         let mut map = self.failures.lock().unwrap_or_else(|e| e.into_inner());
         map.retain(|_, (_, since)| since.elapsed() < WINDOW);
-        map.entry(ip).or_insert((0, Instant::now())).0 += 1;
+        let entry = map.entry(ip).or_insert((0, Instant::now()));
+        if entry.0 >= MAX_FAILURES {
+            return false;
+        }
+        entry.0 += 1;
+        true
     }
 
     pub fn clear_failures(&self, ip: IpAddr) {
