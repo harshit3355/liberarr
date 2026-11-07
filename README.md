@@ -1,14 +1,82 @@
 # Liberarr
 
-A single CLI that frees your Plaud recordings from the vendor: transcript, French summary, mind map and action table, with the AI provider of your choice, exported to Obsidian and browsable in a local web UI.
+A single CLI that frees your Plaud recordings from the vendor. Audio comes straight off the device over Bluetooth (or from local files); Liberarr produces a transcript, a French summary, a mind map and an action table with the AI provider of your choice, exports notes to Obsidian, and serves a local web UI. One binary, nothing else to install.
 
-> **Status: v2 rewrite in progress.** The Python v1 was removed; this branch holds the Rust workspace skeleton. Nothing is usable yet.
+Liberarr is an independent project, **not affiliated with, endorsed by or sponsored by Plaud**. "Plaud" is used only to describe the hardware it works with.
 
-Liberarr is an independent project, not affiliated with Plaud. MIT licensed (see [LICENSE](LICENSE), [NOTICE](NOTICE)).
+## Install
+
+Download `liberarr-<target>.tar.gz` for your platform from the [releases page](../../releases) (`aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`), check it against the `.sha256` file, and unpack it:
+
+```sh
+shasum -a 256 -c liberarr-<target>.tar.gz.sha256
+tar -xzf liberarr-<target>.tar.gz
+chmod +x liberarr
+xattr -d com.apple.quarantine liberarr   # macOS only: the binary is not notarized
+./liberarr --version
+```
+
+Linux uses the host's BlueZ service for Bluetooth (present on desktop distributions); `libdbus` is linked dynamically.
+
+## Quick start
+
+```sh
+liberarr init    # creates ~/.liberarr/.env: generated secrets, asks for your AI provider keys
+liberarr link    # one-time: fetches the device keys from your Plaud account, then tests an unlock
+liberarr pull    # pulls new recordings off the device, then processes them
+liberarr serve   # web UI on http://127.0.0.1:8484
+```
+
+| Command | Purpose |
+|---|---|
+| `init` | Create the home folder and `.env`. Idempotent: values already set are kept. Prints the generated admin password once. |
+| `link [--force]` | Paste your Plaud web-app token (hidden prompt); it is used for this run only and never stored. Fetches the device keys; a key pair already stored is only replaced with `--force`. |
+| `pull [--no-process]` | Wake the device and close the Plaud app on your phone first. Resumes dropped downloads, never pulls the same recording twice, skips a recording still in progress. |
+| `process <files…>` | Run the pipeline on local audio files. |
+| `serve [--host] [--port]` | Web UI and API, with the job worker. |
+| `status` | Known devices, last pull, queued and failed work. |
+
+## Configuration
+
+Everything lives in `LIBERARR_HOME` (default `~/.liberarr`): `.env`, `liberarr.db`, `audio/`, `device/`, `obsidian/`.
+
+- **`LIBERARR_HOME` must be on a local disk.** The job worker lock uses advisory file locks, which are unreliable on network filesystems and some Docker bind mounts.
+- **`<LIBERARR_HOME>/.env` is the only configuration source** (mode 0600, written by `init`). Shell variables are ignored; the one exception is `LIBERARR_HOME` itself, which locates the file. Liberarr refuses to start when a secret is missing or still a placeholder, naming the variable but never its value.
+- Optional settings, not written by `init` (add them to `.env`):
+  - `LIBERARR_OBSIDIAN_DIR`: folder (for example a vault) for the Obsidian export; default `<LIBERARR_HOME>/obsidian`. The export is one-way and only writes between `%% liberarr:start %%` and `%% liberarr:end %%`.
+  - `LIBERARR_COOKIE_SECURE=true`: set the `Secure` flag on the login cookie when serving over HTTPS.
+
+## AI providers
+
+Two profiles in `.env`, each with its own `BASE_URL`, `API_KEY` and `MODEL`: `LIBERARR_TRANSCRIBE_*` (speech to text) and `LIBERARR_LLM_*` (summary). Any OpenAI-compatible endpoint works:
+
+- **OpenAI, Groq or Gemini**: use their OpenAI-compatible base URL.
+- **Claude**: through an OpenAI-compatible gateway (for example LiteLLM). For the **summary only**: Claude does not transcribe audio, so keep a speech-to-text provider on the transcribe profile.
+
+Transcription forces no language, so French mixed with English works. Summaries are in French. Audio above 25 MB is split without ffmpeg only for Ogg (the device format); other formats above 25 MB are refused.
+
+## Web UI and network exposure
+
+`serve` listens on `127.0.0.1:8484` by default. One admin user (`admin`, password in `.env`), login rate limit, and an API key. To reach it from your LAN or a NAS, pass `--host 0.0.0.0` and put it behind a reverse proxy or VPN; under HTTPS set `LIBERARR_COOKIE_SECURE=true`. `serve` never talks to the device: run `pull` separately.
+
+## Hybrid mode with the Plaud app
+
+Liberarr and the Plaud phone app can coexist, with these rules:
+
+- Keep the app **only for firmware updates**.
+- Turn **off "Sync in idle"** in the app, and do not sync recordings through the app.
+- Apply a firmware update only after checking its release notes, then verify `liberarr pull` still works.
+- Close the app on your phone before `pull` or `link`: the device talks to one Bluetooth client at a time.
+
+## Privacy
+
+- **Every recording is sent to the AI providers you configure** (audio to the transcribe provider, transcript to the LLM provider). There is no per-type routing in v2. Choose providers you trust, or none you would not give a work meeting to.
+- `link` fetches the device keys from your Plaud account once. Plaud keeps its own copy of the key pair; Liberarr cannot change that.
+- Device keys are stored encrypted at rest under a key from `.env`. Transcripts, audio, tokens, keys and serials are never logged.
 
 ## Development
 
-Requirements: Rust (version pinned in `rust-toolchain.toml`) and Node (build-time only, for the web UI).
+Requirements: Rust (version pinned in `rust-toolchain.toml`) and Node (build-time only, for the web UI). On Linux also `libdbus-1-dev` and `pkg-config`.
 
 ```sh
 npm --prefix web ci && npm --prefix web run build   # builds web/dist, embedded into the binary
@@ -16,4 +84,8 @@ cargo build --release
 ./target/release/liberarr --version
 ```
 
-Rules for contributors and AI agents: see [AGENTS.md](AGENTS.md).
+Contributors can also use `cargo install --path crates/liberarr --locked` after the web build. Rules for contributors and AI agents: see [AGENTS.md](AGENTS.md).
+
+## License
+
+MIT, see [LICENSE](LICENSE). Protocol credits in [NOTICE](NOTICE).
