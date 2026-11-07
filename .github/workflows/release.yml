@@ -18,10 +18,11 @@ jobs:
           - target: x86_64-apple-darwin
             os: macos-15-intel
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-24.04
+            os: ubuntu-22.04
           # Native arm64 runner: aws-lc-sys and rusqlite need a native C toolchain, so no cross-compiling.
+          # Ubuntu 22.04 (glibc 2.35) keeps the binaries running on Debian 12 and similar NAS systems.
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04-arm
+            os: ubuntu-22.04-arm
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -41,7 +42,11 @@ jobs:
       - run: cargo build --release --locked
       - name: Package
         run: |
-          ./target/release/liberarr --version
+          version="$(./target/release/liberarr --version)"
+          if [ "$version" != "liberarr ${GITHUB_REF_NAME#v}" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match '$version'" >&2
+            exit 1
+          fi
           name="liberarr-${{ matrix.target }}"
           tar -C target/release -czf "$name.tar.gz" liberarr
           shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"

@@ -12,11 +12,12 @@ Download `liberarr-<target>.tar.gz` for your platform from the [releases page](.
 shasum -a 256 -c liberarr-<target>.tar.gz.sha256
 tar -xzf liberarr-<target>.tar.gz
 chmod +x liberarr
-xattr -d com.apple.quarantine liberarr   # macOS only: the binary is not notarized
-./liberarr --version
+xattr -d com.apple.quarantine liberarr 2>/dev/null || true   # macOS: the binary is not notarized
+mkdir -p ~/.local/bin && mv liberarr ~/.local/bin/           # then make sure ~/.local/bin is in your PATH
+liberarr --version
 ```
 
-Linux uses the host's BlueZ service for Bluetooth (present on desktop distributions); `libdbus` is linked dynamically.
+Linux builds need glibc 2.35 or newer (Ubuntu 22.04, Debian 12) and use the host's BlueZ service for Bluetooth (present on desktop distributions); `libdbus` is linked dynamically.
 
 ## Quick start
 
@@ -30,7 +31,7 @@ liberarr serve   # web UI on http://127.0.0.1:8484
 | Command | Purpose |
 |---|---|
 | `init` | Create the home folder and `.env`. Idempotent: values already set are kept. Prints the generated admin password once. |
-| `link [--force]` | Paste your Plaud web-app token (hidden prompt); it is used for this run only and never stored. Fetches the device keys; a key pair already stored is only replaced with `--force`. |
+| `link [--force]` | Paste your Plaud web-app token (hidden prompt). To find it: log in at web.plaud.ai, then in the browser DevTools open Application → Cookies and copy the `pld_ut` value. The token is used for this run only and never stored. Fetches the device keys; a key pair already stored is only replaced with `--force`. |
 | `pull [--no-process]` | Wake the device and close the Plaud app on your phone first. Resumes dropped downloads, never pulls the same recording twice, skips a recording still in progress. |
 | `process <files…>` | Run the pipeline on local audio files. |
 | `serve [--host] [--port]` | Web UI and API, with the job worker. |
@@ -70,7 +71,7 @@ Liberarr and the Plaud phone app can coexist, with these rules:
 
 ## Privacy
 
-- **Every recording is sent to the AI providers you configure** (audio to the transcribe provider, transcript to the LLM provider). There is no per-type routing in v2. Choose providers you trust, or none you would not give a work meeting to.
+- **Every recording is sent to the AI providers you configure** (audio to the transcribe provider, transcript to the LLM provider). There is no per-type routing in v2. Do not use a provider you would not trust with a work meeting.
 - `link` fetches the device keys from your Plaud account once. Plaud keeps its own copy of the key pair; Liberarr cannot change that.
 - Device keys are stored encrypted at rest under a key from `.env`. Transcripts, audio, tokens, keys and serials are never logged.
 
