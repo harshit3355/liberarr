@@ -1,6 +1,6 @@
 //! Composition root: the one place where adapters are wired to the core ports.
 use crate::config::{Config, Profile};
-use liberarr_core::ai::{Provider, Timestamps, capability};
+use liberarr_core::ai::{DEFAULT_UPLOAD_BYTES, Provider, Timestamps, capability};
 use liberarr_core::exports::ExportToObsidian;
 use liberarr_core::jobs::{Job, JobInfo, JobQueue, StepHandler, run_job_once};
 use liberarr_core::recordings::{Ingest, Recording, RecordingItem, RecordingRepo};
@@ -25,8 +25,6 @@ pub struct App {
     pub db: Db,
     transcriber: AnyTranscriber,
     llm: AnyLlm,
-    /// Largest upload the transcription provider accepts.
-    max_chunk_bytes: usize,
     audio: FsAudioStore,
 }
 
@@ -96,8 +94,6 @@ impl App {
         Ok(App {
             transcriber: transcriber(&cfg.transcribe),
             llm: llm(&cfg.llm),
-            max_chunk_bytes: capability(cfg.transcribe.provider, &cfg.transcribe.model)
-                .max_upload_bytes,
             audio: FsAudioStore {
                 audio: audio_dir(&cfg),
             },
@@ -148,7 +144,7 @@ impl StepHandler for App {
                     splitter: &OggSplitter,
                     transcriber: &self.transcriber,
                     transcripts: &self.db,
-                    max_chunk_bytes: self.max_chunk_bytes,
+                    max_chunk_bytes: DEFAULT_UPLOAD_BYTES,
                 }
                 .run(id)
                 .await

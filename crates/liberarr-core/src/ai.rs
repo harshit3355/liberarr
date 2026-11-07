@@ -54,8 +54,6 @@ pub enum Timestamps {
 pub struct Capability {
     /// `None`: the provider cannot transcribe.
     pub transcription: Option<Timestamps>,
-    pub summaries: bool,
-    pub max_upload_bytes: usize,
 }
 
 pub fn capability(p: Provider, model: &str) -> Capability {
@@ -73,17 +71,14 @@ pub fn capability(p: Provider, model: &str) -> Capability {
         // Azure models are deployment names: nothing can be known upfront.
         _ => Some(Timestamps::Unknown),
     };
-    Capability {
-        transcription,
-        summaries: true,
-        max_upload_bytes: DEFAULT_UPLOAD_BYTES,
-    }
+    Capability { transcription }
 }
 
 pub fn supports(c: Capability, step: Step) -> bool {
     match step {
         Step::Transcribe => c.transcription.is_some(),
-        Step::Summarize => c.summaries,
+        // Every provider can summarize.
+        Step::Summarize => true,
     }
 }
 

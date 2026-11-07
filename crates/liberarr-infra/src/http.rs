@@ -11,11 +11,12 @@ pub(crate) enum Auth<'a> {
 }
 
 /// No redirects: a hostile or misconfigured base URL must not forward the key or the audio.
+/// A 3xx then reaches `send` as an error.
 pub(crate) fn client() -> reqwest::Client {
     reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .unwrap_or_default()
+        .expect("reqwest client")
 }
 
 /// Sends the request, maps failures to `Error::Provider` and returns the parsed JSON reply.
@@ -48,6 +49,12 @@ pub(crate) async fn send(
         return Err(Error::Provider(format!(
             "provider refused the API key (HTTP {status})"
         )));
+    }
+    if status.is_redirection() {
+        // Never echo `Location`: it can carry anything.
+        return Err(Error::Provider(
+            "redirect refused: check the base URL (https?)".into(),
+        ));
     }
     if !status.is_success() {
         let msg = json
