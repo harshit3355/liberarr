@@ -159,9 +159,9 @@ impl PartialStore for FsPartialStore {
     }
 }
 
-/// Stores audio as `<audio>/<fingerprint>.<ext>`. A source already under `audio` is a staged
-/// device Ogg Liberarr wrote itself: it is moved. Anything else is the user's own file: it is
-/// copied, never moved or deleted.
+/// Stores audio as `<audio>/<fingerprint>.<ext>`. Only a regular (non-symlink) `device-*` file
+/// directly in `audio` is a staged device Ogg Liberarr wrote itself: it is moved. Anything
+/// else is the user's own file: it is copied, never moved or deleted.
 pub struct FsAudioStore {
     pub audio: PathBuf,
 }
@@ -175,7 +175,12 @@ impl AudioStore for FsAudioStore {
         mkdir(&self.audio, 0o700)?;
         let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("ogg");
         let dest = self.audio.join(format!("{fingerprint}.{ext}"));
-        if src.starts_with(&self.audio) {
+        let staged = src.parent() == Some(self.audio.as_path())
+            && src
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("device-"))
+            && fs::symlink_metadata(src).is_ok_and(|m| m.file_type().is_file());
+        if staged {
             // Same directory as the staging area, so a plain rename (never cross-device).
             fs::rename(src, &dest).map_err(|e| io_err("move audio", e))?;
         } else {
@@ -290,5 +295,31 @@ mod tests {
             std::fs::metadata(&kept2.path).unwrap().permissions().mode() & 0o777,
             0o600
         );
+    }
+
+    #[test]
+    fn user_file_inside_audio_dir_is_copied() {
+        let d = Dir::new("inside");
+        let audio = d.0.join("audio");
+        std::fs::create_dir_all(&audio).unwrap();
+        let store = FsAudioStore {
+            audio: audio.clone(),
+        };
+        let user = audio.join("mine.ogg");
+        std::fs::write(&user, b"mine").unwrap();
+        let kept = store.store(&user, "fp1").unwrap();
+        assert!(user.exists(), "non-device file in the audio dir must stay");
+        assert_eq!(std::fs::read(&kept.path).unwrap(), b"mine");
+
+        // `..` escapes and symlinks named `device-*` are copied too.
+        let outside = d.0.join("a.ogg");
+        std::fs::write(&outside, b"outside").unwrap();
+        let sneaky = audio.join("../a.ogg");
+        store.store(&sneaky, "fp2").unwrap();
+        assert!(outside.exists());
+        let link = audio.join("device-link.ogg");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        store.store(&link, "fp3").unwrap();
+        assert!(link.exists() && outside.exists());
     }
 }
