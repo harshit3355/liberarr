@@ -38,6 +38,7 @@ Dependency direction (checked by Cargo): `core` depends on no other workspace cr
 - CLI: clap. HTTP: axum. DB: SQLite via rusqlite (bundled). Device: btleplug (BLE). AI: reqwest, one adapter per provider.
 - UI: **Vite** + React + TypeScript, Tailwind, TanStack Query, Mermaid. Built to `web/dist` and embedded in the binary. Node is a contributor/CI build tool only, never a user prerequisite. Build order: `npm --prefix web ci && npm --prefix web run build`, then `cargo build --release`.
 - Transcription must handle **French with mixed English** in the same recording (multilingual models only, no forced language). Summaries default to French.
+- User-facing text (CLI, web UI, exported notes) is translatable. Supported languages: English (default) and French; the language follows the system or browser setting.
 - Local transcription and speaker identification (whisper-rs, sherpa-onnx) arrive in v3.
 
 ## Security & privacy
@@ -58,4 +59,4 @@ Dependency direction (checked by Cargo): `core` depends on no other workspace cr
 - Verify before claiming done: run the tests/build and report real output, including failures.
 - Reverse engineering of the Plaud device/app is a **separate project**; do not mix it into app code. The device protocol is implemented only from documented facts (see `NOTICE`) and lands as a source.
 - Design docs and plans live in `docs/superpowers/` and are **never versioned** (gitignored).
-- Talk to the owner in French; write code, comments, commit messages and docs in English.
+- Talk to the owner in French. Everything else is in English: code, comments, commit messages, docs, GitHub issues, pull requests and labels.
