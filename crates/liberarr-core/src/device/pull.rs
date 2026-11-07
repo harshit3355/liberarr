@@ -10,6 +10,7 @@ use rsa::RsaPrivateKey;
 use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::pkcs8::DecodePrivateKey;
 use sha2::{Digest, Sha256};
+use std::future::Future;
 use std::time::Duration;
 
 const SCAN_SECS: u64 = 12;
@@ -30,6 +31,8 @@ pub struct PullReport {
     /// Sessions whose size changed between the two listings: still being recorded.
     pub skipped_recording: Vec<u32>,
     pub failed: Vec<(u32, String)>,
+    /// `(last 4 chars of the serial, reason)` for a device that could not be reached or listed.
+    pub device_errors: Vec<(String, String)>,
     pub no_device: bool,
 }
 
@@ -55,7 +58,11 @@ where
     Q: JobQueue,
     S: AudioStore,
 {
-    pub async fn run(&self, sleep: impl Fn(Duration)) -> Result<PullReport> {
+    /// `sleep` is injected so tests never wait; it is async so it never blocks a runtime thread.
+    pub async fn run<F: Future<Output = ()>>(
+        &self,
+        sleep: impl Fn(Duration) -> F,
+    ) -> Result<PullReport> {
         let mut report = PullReport::default();
         let materials = self.keys.load()?;
         let seen = if materials.is_empty() {
@@ -83,21 +90,40 @@ where
         Ok(report)
     }
 
-    async fn pull_device(
+    async fn pull_device<F: Future<Output = ()>>(
         &self,
         ad: &Advert,
         m: &UnlockMaterial,
-        sleep: &impl Fn(Duration),
+        sleep: &impl Fn(Duration) -> F,
         report: &mut PullReport,
     ) -> Result<()> {
         let key = RsaPrivateKey::from_pkcs8_pem(&m.private_pem)
             .or_else(|_| RsaPrivateKey::from_pkcs1_pem(&m.private_pem))
-            .map_err(|_| Error::Device("stored private key is unreadable".into()))?;
+            .map_err(|_| Error::Device("stored private key is unreadable".into()));
         let hash = serial_hash(&m.serial);
-        let mut dev = self.connector.open(ad, m).await?;
-        let before = dev.list().await?;
-        sleep(SETTLE);
-        let after = dev.list().await?;
+        // A device that cannot be reached must not stop the others: report it and move on.
+        let reached = async {
+            let mut dev = self.connector.open(ad, m).await?;
+            let before = dev.list().await?;
+            sleep(SETTLE).await;
+            let after = dev.list().await?;
+            Ok::<_, Error>((dev, before, after))
+        };
+        let reached = match key {
+            Ok(k) => reached.await.map(|r| (k, r)),
+            Err(e) => Err(e),
+        };
+        let (key, (mut dev, before, after)) = match reached {
+            Ok(r) => r,
+            Err(e) => {
+                let tail = m
+                    .serial
+                    .get(m.serial.len().saturating_sub(4)..)
+                    .unwrap_or("");
+                report.device_errors.push((tail.into(), e.to_string()));
+                return Ok(());
+            }
+        };
         let known = self.ledger.known(&hash).await?;
 
         for (session, size) in after {
@@ -154,16 +180,25 @@ where
         let mut start = start as u32; // <= size
         while start < size {
             let (mut next, mut misaligned) = (start, false);
+            let mut storage = None;
             let mut sink = |offset: u32, data: &[u8]| -> Result<()> {
                 if offset != next {
                     misaligned = true;
                     return Err(Error::Device("unexpected data offset".into()));
                 }
-                self.partials.append(part, data)?;
+                if let Err(e) = self.partials.append(part, data) {
+                    storage = Some(e);
+                    return Err(Error::Device("cannot store downloaded data".into()));
+                }
                 next = next.saturating_add(data.len() as u32);
                 Ok(())
             };
-            match dev.download(session, start, size, &mut sink).await {
+            let downloaded = dev.download(session, start, size, &mut sink).await;
+            // A storage error stops the whole pull; it is not a per-session failure.
+            if let Some(e) = storage {
+                return Err(e);
+            }
+            match downloaded {
                 Ok(()) => break,
                 // The device ignored the start offset: correctness never depends on resume.
                 Err(_) if misaligned && start > 0 => {
@@ -222,6 +257,10 @@ mod tests {
         }
 
         fn pull(&self) -> PullReport {
+            self.try_pull().expect("pull")
+        }
+
+        fn try_pull(&self) -> Result<PullReport> {
             let p = PullRecordings {
                 scanner: &self.dev,
                 connector: &self.dev,
@@ -235,7 +274,7 @@ mod tests {
                 },
                 tz: TimeZone::fixed(offset(2)),
             };
-            block_on(p.run(|_| {})).expect("pull")
+            block_on(p.run(|_| async {}))
         }
 
         fn part_key() -> String {
@@ -347,5 +386,28 @@ mod tests {
         assert!(rig.parts.staged.borrow().is_empty());
         assert!(rig.recs.0.borrow().is_empty());
         assert!(rig.ledger.records.borrow().is_empty());
+    }
+
+    #[test]
+    fn pull_after_crash_between_ingest_and_record_does_not_duplicate() {
+        let (ogg, file) = ogg_and_device_file();
+        let rig = Rig::new(FakeDevice::with_file(file));
+        // Crash window: the recording is ingested, the ledger write never lands.
+        rig.ledger.fail_record.set(true);
+        assert!(rig.try_pull().is_err());
+        assert_eq!(rig.recs.0.borrow().len(), 1);
+        assert!(rig.ledger.records.borrow().is_empty());
+        assert!(!rig.parts.parts.borrow().is_empty()); // the full .part is still there
+
+        rig.ledger.fail_record.set(false);
+        let r = rig.pull();
+        assert_eq!(r.pulled, vec![1]); // the same recording, not a new one
+        assert_eq!(rig.recs.0.borrow().len(), 1);
+        assert_eq!(rig.jobs.rows().len(), 1);
+        assert_eq!(rig.ledger.records.borrow().len(), 1);
+        assert!(rig.parts.parts.borrow().is_empty());
+        assert_eq!(rig.parts.staged.borrow()[&Rig::part_key()], ogg);
+        // Nothing was downloaded again.
+        assert_eq!(rig.dev.0.downloads.borrow().len(), 1);
     }
 }

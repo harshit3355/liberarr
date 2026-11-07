@@ -166,12 +166,16 @@ pub struct MemLedger {
     pub known: RefCell<HashSet<u32>>,
     /// `(serial_hash, session, size, recording_id)`
     pub records: RefCell<Vec<(String, u32, u32, i64)>>,
+    pub fail_record: Cell<bool>,
 }
 impl DeviceLedger for MemLedger {
     async fn known(&self, _serial_hash: &str) -> Result<HashSet<u32>> {
         Ok(self.known.borrow().clone())
     }
     async fn record(&self, hash: &str, session: u32, size: u32, id: i64) -> Result<()> {
+        if self.fail_record.get() {
+            return Err(Error::Storage("ledger unavailable".into()));
+        }
         self.records
             .borrow_mut()
             .push((hash.into(), session, size, id));
