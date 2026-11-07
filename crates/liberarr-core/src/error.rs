@@ -7,8 +7,6 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 pub enum Error {
     #[error("{0} not found")]
     NotFound(String),
-    #[error("unknown pipeline step: {0}")]
-    UnknownStep(String),
     #[error(transparent)]
     InvalidSummary(#[from] InvalidSummary),
     #[error("storage: {0}")]

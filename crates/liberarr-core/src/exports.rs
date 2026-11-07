@@ -96,8 +96,10 @@ pub fn upsert_block(existing: Option<&str>, block: &str, front: &str) -> String 
     let Some(existing) = existing else {
         return format!("{front}\n{block}\n");
     };
-    if let Some(start) = existing.rfind(START)
-        && let Some(end) = existing[start..].find(END)
+    // From the end: an orphan START after the real block must not hide it.
+    if let Some((start, end)) = existing
+        .rmatch_indices(START)
+        .find_map(|(start, _)| Some((start, existing[start..].find(END)?)))
     {
         return format!(
             "{}{}{}",
@@ -246,6 +248,20 @@ mod tests {
     }
 
     #[test]
+    fn upsert_skips_trailing_orphan_start() {
+        let existing = "top\n%% liberarr:start %%\nold\n%% liberarr:end %%\nmid\n%% liberarr:start %%\nowner text\n";
+        let out = upsert_block(
+            Some(existing),
+            "%% liberarr:start %%\nnew\n%% liberarr:end %%",
+            "",
+        );
+        assert_eq!(
+            out,
+            "top\n%% liberarr:start %%\nnew\n%% liberarr:end %%\nmid\n%% liberarr:start %%\nowner text\n"
+        );
+    }
+
+    #[test]
     fn note_filename_uses_local_time() {
         let rec = Recording {
             id: 1,
@@ -261,6 +277,15 @@ mod tests {
         assert_eq!(
             note_filename(&rec, "Point/hebdo: \"v2\"?", &paris),
             "2026-06-02 1605 - Pointhebdo v2.md"
+        );
+        // Winter (CET, UTC+1): the brief's 14:05 UTC -> 1505.
+        let winter = Recording {
+            created_at: "2026-01-15T14:05:00Z".parse().unwrap(),
+            ..rec
+        };
+        assert_eq!(
+            note_filename(&winter, "Point", &paris),
+            "2026-01-15 1505 - Point.md"
         );
     }
 

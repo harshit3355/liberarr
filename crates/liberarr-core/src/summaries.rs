@@ -32,8 +32,15 @@ pub struct MeetingSummary {
 
 /// LLM output is untrusted: it must be the exact JSON shape with a Mermaid mindmap.
 pub fn parse_summary(text: &str) -> Result<MeetingSummary, InvalidSummary> {
-    let mut s: MeetingSummary =
-        serde_json::from_str(text).map_err(|e| InvalidSummary(e.to_string()))?;
+    // serde messages can quote the model's text (summary content), so keep only category and position.
+    let mut s: MeetingSummary = serde_json::from_str(text).map_err(|e| {
+        InvalidSummary(format!(
+            "{:?} error at line {} column {}",
+            e.classify(),
+            e.line(),
+            e.column()
+        ))
+    })?;
     if !s.mindmap.trim_start().starts_with("mindmap") {
         return Err(InvalidSummary(
             "mindmap must be a Mermaid diagram starting with 'mindmap'".into(),

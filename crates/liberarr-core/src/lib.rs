@@ -156,8 +156,20 @@ mod fakes {
         async fn reset_stale(&self) -> Result<u64> {
             unreachable!("not used by core use cases")
         }
-        async fn list_for(&self, _recording_id: i64) -> Result<Vec<JobInfo>> {
-            unreachable!("not used by core use cases")
+        async fn list_for(&self, recording_id: i64) -> Result<Vec<JobInfo>> {
+            Ok(self
+                .0
+                .borrow()
+                .iter()
+                .filter(|r| r.job.recording_id == recording_id)
+                .map(|r| JobInfo {
+                    id: r.job.id,
+                    step: r.job.step.clone(),
+                    status: r.status,
+                    attempts: r.job.attempts,
+                    error: r.error.clone(),
+                })
+                .collect())
         }
     }
 
