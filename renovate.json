@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "skipInstalls=false: npm 12 --package-lock-only refuses registry tarballs of packages with bundleDependencies (EALLOWREMOTE, npm/cli#9800); a full install does not. Remove once that issue is fixed.",
+  "description": "skipInstalls=false: npm 12 --package-lock-only refuses registry tarballs of packages with bundleDependencies (EALLOWREMOTE, npm/cli#9800); a full install does not. Remove once that issue is fixed. platformAutomerge=false: without branch protection, GitHub auto-merge would merge before the checks finish; Renovate merges itself only once every check (CI and the 7-day age) is green.",
   "extends": [
     "config:recommended",
     "helpers:pinGitHubActionDigests"
@@ -42,7 +42,8 @@
       "groupSlug": "{{manager}}-non-major",
       "addLabels": [
         "update: minor"
-      ]
+      ],
+      "automerge": true
     },
     {
       "matchUpdateTypes": [
@@ -53,7 +54,9 @@
       "groupSlug": "{{manager}}-non-major",
       "addLabels": [
         "update: minor"
-      ]
+      ],
+      "automerge": true
     }
-  ]
+  ],
+  "platformAutomerge": false
 }

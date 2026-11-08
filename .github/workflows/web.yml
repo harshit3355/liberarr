@@ -6,6 +6,8 @@ on:
   pull_request:
     paths:
       - "web/**"
+      # The contributor Node version: a Renovate bump of it must not merge untested.
+      - mise.toml
       - .github/workflows/web.yml
 
 permissions:
