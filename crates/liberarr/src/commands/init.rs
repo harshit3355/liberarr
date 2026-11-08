@@ -30,7 +30,19 @@ pub(crate) fn merge(existing: &str, updates: &[(&str, String)]) -> String {
     out.join("\n") + "\n"
 }
 
-pub fn run(non_interactive: bool) -> Outcome {
+/// What `apply` did: where the `.env` is, whether it changed, and the admin password when it was
+/// just generated (shown once by the caller).
+pub struct Saved {
+    pub path: std::path::PathBuf,
+    pub changed: bool,
+    pub password: Option<String>,
+}
+
+/// Creates or completes the `.env`: questions through `prompter`, or from the environment when
+/// `None` (`--non-interactive`). Prints nothing.
+pub fn apply(
+    prompter: Option<&mut dyn setup::Prompter>,
+) -> Result<Saved, Box<dyn std::error::Error>> {
     let home = config::home()?;
     std::fs::DirBuilder::new()
         .recursive(true)
@@ -50,23 +62,27 @@ pub fn run(non_interactive: bool) -> Outcome {
     };
     let current = parse_env(&existing);
     let ui = i18n::language(current.get("LIBERARR_LANG").map(String::as_str));
-    let plan = if non_interactive {
-        setup::from_env(&current, ui, |k| std::env::var(k).ok())?
-    } else {
-        let rt = tokio::runtime::Runtime::new()?;
-        setup::run_setup(
-            &mut PlainPrompter,
-            &current,
-            ui,
-            &|p, url, key| setup::connect(&rt, p, url, key),
-            &|url, key, model| setup::routes(&rt, url, key, model),
-        )?
+    let plan = match prompter {
+        None => setup::from_env(&current, ui, |k| std::env::var(k).ok())?,
+        Some(p) => {
+            let rt = tokio::runtime::Runtime::new()?;
+            setup::run_setup(
+                p,
+                &current,
+                ui,
+                &|p, url, key| setup::connect(&rt, p, url, key),
+                &|url, key, model| setup::routes(&rt, url, key, model),
+            )?
+        }
     };
     let setup::Plan { updates, password } = plan;
     if updates.is_empty() {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-        println!("{}", t!("init.already_complete", path = path.display()));
-        return Ok(ExitCode::SUCCESS);
+        return Ok(Saved {
+            path,
+            changed: false,
+            password,
+        });
     }
 
     // Temp file created 0600, then renamed: the secrets are never readable by others, even briefly.
@@ -80,12 +96,37 @@ pub fn run(non_interactive: bool) -> Outcome {
     f.write_all(merge(&existing, &updates).as_bytes())?;
     f.sync_all()?;
     std::fs::rename(&tmp, &path)?;
+    Ok(Saved {
+        path,
+        changed: true,
+        password,
+    })
+}
 
-    println!("{}", t!("init.saved", path = path.display()));
-    if let Some(p) = password {
-        println!("{}", t!("init.login", password = p));
-        println!("{}", t!("init.login_note"));
+/// The lines shown once `apply` is done (the CLI prints them, the terminal UI shows them).
+pub fn report(saved: &Saved) -> Vec<String> {
+    if !saved.changed {
+        return vec![t!("init.already_complete", path = saved.path.display()).into_owned()];
     }
-    println!("{}", t!("init.next_steps"));
+    let mut lines = vec![t!("init.saved", path = saved.path.display()).into_owned()];
+    if let Some(p) = &saved.password {
+        lines.push(t!("init.login", password = p).into_owned());
+        lines.push(t!("init.login_note").into_owned());
+    }
+    lines.push(t!("init.next_steps").into_owned());
+    lines
+}
+
+pub fn run(non_interactive: bool, tui: bool) -> Outcome {
+    let saved = if non_interactive {
+        apply(None)?
+    } else if tui {
+        crate::tui::setup_only()?
+    } else {
+        apply(Some(&mut PlainPrompter))?
+    };
+    for line in report(&saved) {
+        println!("{line}");
+    }
     Ok(ExitCode::SUCCESS)
 }

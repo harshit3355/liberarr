@@ -21,6 +21,9 @@ getrandom = { workspace = true }
 rpassword = { workspace = true }
 # Translatable CLI text: catalogs under `locales/` are embedded at compile time.
 rust-i18n = { workspace = true }
+# `liberarr tui`: full-screen terminal UI (crossterm backend) and its transition effects.
+ratatui = { workspace = true }
+tachyonfx = { workspace = true }
 
 [dev-dependencies]
 # Builds the mock provider's chat reply in the end-to-end test.

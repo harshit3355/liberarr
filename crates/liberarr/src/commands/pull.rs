@@ -4,26 +4,46 @@ use crate::container::{App, keys, partials};
 use liberarr_core::Result;
 use liberarr_core::device::ports::{DeviceConnector, DeviceSession, KeyStore, UnlockMaterial};
 use liberarr_core::device::protocol::Advert;
-use liberarr_core::device::pull::PullRecordings;
+use liberarr_core::device::pull::{PullRecordings, PullReport};
 use liberarr_core::jobs::JobQueue;
 use liberarr_infra::ble::{BtleConnector, BtleScanner, default_adapter};
 use rust_i18n::t;
 use std::io::Write;
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// Wraps the connector so every download draws a progress line (bytes, speed, ETA).
-struct Progress<C>(C);
-struct ProgressSession<S>(S);
+/// Where a download stands, reported at most every 250 ms.
+#[derive(Clone)]
+pub struct Transfer {
+    /// Local start time of the recording (`YYYY-MM-DD HH:MM`).
+    pub label: String,
+    pub done: u64,
+    pub total: u64,
+    /// Bytes per second.
+    pub speed: f64,
+    /// Seconds left.
+    pub eta: u64,
+}
+
+/// Receives the progress of each download, then `None` when it ends.
+pub type OnTransfer = Arc<dyn Fn(Option<&Transfer>) + Send + Sync>;
+
+/// Wraps the connector so every download reports its progress (bytes, speed, ETA).
+struct Progress<C>(C, OnTransfer);
+struct ProgressSession<S>(S, OnTransfer);
 
 impl<C: DeviceConnector> DeviceConnector for Progress<C> {
     type Session = ProgressSession<C::Session>;
     async fn open(&self, ad: &Advert, unlock: &UnlockMaterial) -> Result<Self::Session> {
-        Ok(ProgressSession(self.0.open(ad, unlock).await?))
+        Ok(ProgressSession(
+            self.0.open(ad, unlock).await?,
+            Arc::clone(&self.1),
+        ))
     }
 }
 
-fn mb(bytes: u64) -> f64 {
+pub fn mb(bytes: u64) -> f64 {
     bytes as f64 / 1_000_000.0
 }
 
@@ -59,43 +79,32 @@ impl<S: DeviceSession> DeviceSession for ProgressSession<S> {
                     drawn = Some(Instant::now());
                     let speed = got as f64 / t0.elapsed().as_secs_f64().max(0.001);
                     let left = total.saturating_sub(u64::from(start) + got) as f64;
-                    let eta = (left / speed.max(1.0)) as u64;
-                    eprint!(
-                        "\r{}",
-                        t!(
-                            "pull.progress",
-                            label = label,
-                            done = format!("{:.1}", mb(u64::from(start) + got)),
-                            total = format!("{:.1}", mb(total)),
-                            speed = format!("{:.0}", speed / 1000.0),
-                            eta = format!("{}:{:02}", eta / 60, eta % 60)
-                        )
-                    );
-                    let _ = std::io::stderr().flush();
+                    (self.1)(Some(&Transfer {
+                        label: label.clone(),
+                        done: u64::from(start) + got,
+                        total,
+                        speed,
+                        eta: (left / speed.max(1.0)) as u64,
+                    }));
                 }
                 Ok(())
             })
             .await;
-        eprintln!();
+        (self.1)(None);
         r
     }
 }
 
-pub async fn run(app: &App, no_process: bool) -> Outcome {
-    super::note_content_language(&app.cfg);
-    if !no_process {
-        // Once, before any claim: requeues jobs of a dead process and marks this one as a worker.
-        app.db.reset_stale().await?;
-    }
+/// Scans for the linked devices and pulls their new recordings (queued for processing). `None`
+/// when no device is linked.
+pub async fn pull(app: &App, on: OnTransfer) -> Result<Option<PullReport>> {
     let keys = keys(&app.cfg);
     if keys.load()?.is_empty() {
-        eprintln!("{}", t!("pull.no_device_linked"));
-        return Ok(ExitCode::from(2));
+        return Ok(None);
     }
     let adapter = default_adapter().await?;
-    let connector = Progress(BtleConnector::new(adapter.clone()));
-    eprintln!("{}", t!("pull.searching"));
-    let report = PullRecordings {
+    let connector = Progress(BtleConnector::new(adapter.clone()), on);
+    PullRecordings {
         scanner: &BtleScanner::new(adapter),
         connector: &connector,
         keys: &keys,
@@ -105,7 +114,46 @@ pub async fn run(app: &App, no_process: bool) -> Outcome {
         tz: jiff::tz::TimeZone::system(),
     }
     .run(|d| tokio::time::sleep(d))
-    .await?;
+    .await
+    .map(Some)
+}
+
+/// The progress line of the CLI, redrawn in place on stderr.
+fn print_transfer(t: Option<&Transfer>) {
+    match t {
+        Some(t) => {
+            eprint!(
+                "\r{}",
+                t!(
+                    "pull.progress",
+                    label = t.label,
+                    done = format!("{:.1}", mb(t.done)),
+                    total = format!("{:.1}", mb(t.total)),
+                    speed = format!("{:.0}", t.speed / 1000.0),
+                    eta = format!("{}:{:02}", t.eta / 60, t.eta % 60)
+                )
+            );
+            let _ = std::io::stderr().flush();
+        }
+        None => eprintln!(),
+    }
+}
+
+pub async fn run(app: &App, no_process: bool) -> Outcome {
+    super::note_content_language(&app.cfg);
+    if !no_process {
+        // Once, before any claim: requeues jobs of a dead process and marks this one as a worker.
+        app.db.reset_stale().await?;
+    }
+    if keys(&app.cfg).load()?.is_empty() {
+        eprintln!("{}", t!("pull.no_device_linked"));
+        return Ok(ExitCode::from(2));
+    }
+    eprintln!("{}", t!("pull.searching"));
+    let Some(report) = pull(app, Arc::new(print_transfer)).await? else {
+        eprintln!("{}", t!("pull.no_device_linked"));
+        return Ok(ExitCode::from(2));
+    };
 
     if report.no_device {
         eprintln!("{}", t!("pull.no_device_in_range"));

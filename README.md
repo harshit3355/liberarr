@@ -26,16 +26,20 @@ liberarr init    # creates ~/.liberarr/.env: generated secrets, asks for your AI
 liberarr link    # one-time: fetches the device keys from your Plaud account, then tests an unlock
 liberarr pull    # pulls new recordings off the device, then processes them
 liberarr serve   # web UI on http://127.0.0.1:8484
+liberarr tui     # or the full-screen terminal app
 ```
 
 | Command | Purpose |
 |---|---|
-| `init` | Create the home folder and `.env`. Idempotent: values already set are kept. Tests each key and proposes models. `--non-interactive` reads `LIBERARR_{TRANSCRIBE,LLM}_{PROVIDER,BASE_URL,API_KEY,MODEL}` from the environment. Prints the generated admin password once. |
+| `init` | Create the home folder and `.env`. Idempotent: values already set are kept. Tests each key and proposes models. `--non-interactive` reads `LIBERARR_{TRANSCRIBE,LLM}_{PROVIDER,BASE_URL,API_KEY,MODEL}` from the environment. Prints the generated admin password once. `--ui tui` (or `LIBERARR_UI=tui` in the shell) asks the same questions full-screen. |
 | `link [--force]` | Paste your Plaud web-app token (hidden prompt). To find it: log in at web.plaud.ai, then in the browser DevTools open Application → Cookies and copy the `pld_ut` value. The token is used for this run only and never stored. Fetches the device keys; a key pair already stored is only replaced with `--force`. |
 | `pull [--no-process]` | Wake the device and close the Plaud app on your phone first. Resumes dropped downloads, never pulls the same recording twice, skips a recording still in progress. |
 | `process <files…>` | Run the pipeline on local audio files. |
 | `serve [--host] [--port]` | Web UI and API, with the job worker. |
 | `status` | Known devices, last pull, queued and failed work. |
+| `tui` | Full-screen terminal app: recordings and their status, summary, timestamped transcript, mind map, actions to tick, jobs, rerun of a step, pull from the device with progress, settings. Starts with the setup when there is no configuration yet. Runs the job worker; `serve` can run at the same time. Keys are shown at the bottom of each screen. |
+
+The terminal app follows `NO_COLOR` (no colors, no animation) and `LIBERARR_REDUCED_MOTION=1` (no animation); these display preferences, like `LIBERARR_UI`, come from the shell, not from `.env`.
 
 ## Configuration
 

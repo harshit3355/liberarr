@@ -6,6 +6,7 @@ mod i18n;
 mod models;
 mod providers;
 mod setup;
+mod tui;
 
 // Catalogs are embedded at compile time: no locale file is read at runtime.
 rust_i18n::i18n!("locales", fallback = "en");
@@ -31,6 +32,9 @@ enum Cmd {
         /// environment (keys never go on the command line) and fail if one is missing.
         #[arg(long)]
         non_interactive: bool,
+        /// Question style: `plain` (default) or `tui` (full-screen). Default from LIBERARR_UI.
+        #[arg(long, value_parser = ["plain", "tui"])]
+        ui: Option<String>,
     },
     /// Fetch the device keys from your Plaud account once, then test an unlock.
     Link {
@@ -59,16 +63,30 @@ enum Cmd {
     },
     /// Show the known devices, the last pull and queued or failed work.
     Status,
+    /// Full-screen terminal app: recordings, transcripts, summaries, pipeline, device pull,
+    /// settings. Starts with the setup when there is no configuration yet.
+    Tui,
 }
 
 fn run(cmd: Cmd) -> commands::Outcome {
-    if let Cmd::Init { non_interactive } = cmd {
-        return commands::init::run(non_interactive);
+    if let Cmd::Init {
+        non_interactive,
+        ui,
+    } = cmd
+    {
+        let ui = ui.or_else(|| std::env::var("LIBERARR_UI").ok());
+        return commands::init::run(non_interactive, ui.as_deref() == Some("tui"));
+    }
+    if let Cmd::Tui = cmd {
+        return tui::run();
     }
     let cfg = config::load(&config::home()?)?;
     let rt = tokio::runtime::Runtime::new()?;
     if let Cmd::Link { force } = cmd {
         return rt.block_on(commands::link::run(&cfg, force));
+    }
+    for w in container::warnings(&cfg) {
+        eprintln!("{w}");
     }
     // Synchronous open (it may wait on a busy database), before any async work.
     let app = container::App::open(cfg)?;
@@ -78,7 +96,7 @@ fn run(cmd: Cmd) -> commands::Outcome {
             Cmd::Process { files } => commands::process::run(&app, &files).await,
             Cmd::Serve { host, port } => commands::serve::run(app, host, port).await,
             Cmd::Status => commands::status::run(&app).await,
-            Cmd::Init { .. } | Cmd::Link { .. } => unreachable!("handled above"),
+            Cmd::Init { .. } | Cmd::Link { .. } | Cmd::Tui => unreachable!("handled above"),
         }
     })
 }

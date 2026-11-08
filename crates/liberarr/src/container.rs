@@ -104,18 +104,6 @@ impl App {
         std::fs::create_dir_all(&cfg.home)
             .map_err(|e| Error::Storage(format!("create home: {}", e.kind())))?;
         let db = Db::open(&cfg.home.join("liberarr.db"))?;
-        for (step, p) in [
-            (Step::Transcribe, &cfg.transcribe),
-            (Step::Summarize, &cfg.llm),
-        ] {
-            if p.provider == Provider::OpenRouter && p.routing_only.is_empty() {
-                let var = crate::setup::routing_var(step);
-                eprintln!(
-                    "{}",
-                    rust_i18n::t!("config.openrouter_unrestricted", var = var)
-                );
-            }
-        }
         Ok(App {
             transcriber: transcriber(&cfg.transcribe),
             llm: llm(&cfg.llm),
@@ -140,6 +128,21 @@ impl App {
         while run_job_once(&self.db, self).await? {}
         Ok(())
     }
+}
+
+/// Configuration warnings to show before work starts: an OpenRouter step without a provider list.
+pub fn warnings(cfg: &Config) -> Vec<String> {
+    [
+        (Step::Transcribe, &cfg.transcribe),
+        (Step::Summarize, &cfg.llm),
+    ]
+    .into_iter()
+    .filter(|(_, p)| p.provider == Provider::OpenRouter && p.routing_only.is_empty())
+    .map(|(step, _)| {
+        let var = crate::setup::routing_var(step);
+        rust_i18n::t!("config.openrouter_unrestricted", var = var).into_owned()
+    })
+    .collect()
 }
 
 /// `<home>/audio`: shared by the partial store (staging) and the audio store (move vs copy rule).
