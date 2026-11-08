@@ -1,8 +1,59 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": "skipInstalls=false: npm 12 --package-lock-only refuses registry tarballs of packages with bundleDependencies (EALLOWREMOTE, npm/cli#9800); a full install does not. Remove once that issue is fixed.",
-  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
+  ],
   "minimumReleaseAge": "7 days",
   "internalChecksFilter": "strict",
-  "skipInstalls": false
+  "skipInstalls": false,
+  "labels": [
+    "dependencies"
+  ],
+  "packageRules": [
+    {
+      "description": "Majors, and 0.x minors (Cargo and semver treat 0.x -> 0.y as breaking): one PR per dependency.",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "addLabels": [
+        "update: major"
+      ]
+    },
+    {
+      "matchUpdateTypes": [
+        "minor"
+      ],
+      "matchCurrentVersion": "/^v?0\\./",
+      "addLabels": [
+        "update: major"
+      ]
+    },
+    {
+      "description": "One PR of non-major updates per manager (cargo, npm, github-actions...). Patches, digests and pins of 0.x versions included.",
+      "matchUpdateTypes": [
+        "patch",
+        "digest",
+        "pin",
+        "pinDigest"
+      ],
+      "groupName": "{{manager}} non-major",
+      "groupSlug": "{{manager}}-non-major",
+      "addLabels": [
+        "update: minor"
+      ]
+    },
+    {
+      "matchUpdateTypes": [
+        "minor"
+      ],
+      "matchCurrentVersion": "!/^v?0\\./",
+      "groupName": "{{manager}} non-major",
+      "groupSlug": "{{manager}}-non-major",
+      "addLabels": [
+        "update: minor"
+      ]
+    }
+  ]
 }
