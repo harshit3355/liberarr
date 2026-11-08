@@ -5,10 +5,12 @@ use liberarr_core::{Error, Result};
 use serde_json::{Value, json};
 use std::time::Duration;
 
-const TIMEOUT: Duration = Duration::from_secs(180);
+/// Recent models think before answering (adaptive thinking is on by default), which takes time.
+const TIMEOUT: Duration = Duration::from_secs(300);
 pub(crate) const API_VERSION: &str = "2026-10-21";
-/// Room for a long meeting summary; hitting it is an error, not a truncated reply.
-const MAX_TOKENS: u32 = 8192;
+/// Room for a long meeting summary plus the model's thinking, which counts against this limit;
+/// hitting it is an error, not a truncated reply.
+const MAX_TOKENS: u32 = 16000;
 
 pub struct AnthropicLlm {
     base_url: String,
@@ -56,8 +58,11 @@ impl Llm for AnthropicLlm {
             },
         )
         .await?;
-        if r.get("stop_reason").and_then(Value::as_str) == Some("max_tokens") {
-            return Err(Error::Provider("reply cut at max_tokens".into()));
+        match r.get("stop_reason").and_then(Value::as_str) {
+            Some("max_tokens") => return Err(Error::Provider("reply cut at max_tokens".into())),
+            // The model's safety classifiers declined (HTTP 200): say so instead of "no text".
+            Some("refusal") => return Err(Error::Provider("the model refused to reply".into())),
+            _ => {}
         }
         r.get("content")
             .and_then(Value::as_array)
@@ -110,6 +115,10 @@ mod tests {
                 post(|| async {
                     Json(json!({"content":[{"type":"text","text":"{\"a\":"}],"stop_reason":"max_tokens"}))
                 }),
+            )
+            .route(
+                "/refused/v1/messages",
+                post(|| async { Json(json!({"content":[],"stop_reason":"refusal"})) }),
             );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -145,12 +154,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn max_tokens_stop_is_an_error() {
+    async fn cut_or_refused_reply_is_an_error() {
         let base = serve().await;
-        let err = client(&base, "cut")
-            .complete_json(&messages())
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("max_tokens"), "{err}");
+        for (path, expected) in [("cut", "max_tokens"), ("refused", "refused")] {
+            let err = client(&base, path)
+                .complete_json(&messages())
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains(expected), "{err}");
+        }
     }
 }

@@ -3,15 +3,21 @@
 //! summaries, keys or URLs.
 //!
 //! Variables (all optional, a target with missing ones is skipped): MISTRAL_API_KEY,
-//! OPENAI_API_KEY, PROBE_AUDIO (audio file, needed for transcription).
+//! OPENAI_API_KEY, OPENAI_CHAT_MODEL (needed for the OpenAI summary case), ANTHROPIC_API_KEY,
+//! ANTHROPIC_MODEL (default claude-sonnet-5-5), PROBE_CLAUDE_CLI (model alias for the local
+//! `claude` CLI, for example `sonnet`), PROBE_AUDIO (audio file, needed for transcription).
 use liberarr_core::Result;
-use liberarr_core::summaries::{ChatMessage, Llm, Role};
-use liberarr_core::transcription::{ChunkResult, Transcriber};
+use liberarr_core::lang::Language;
+use liberarr_core::summaries::{ChatMessage, Llm, Role, parse_summary, summary_messages};
+use liberarr_core::transcription::{ChunkResult, Segment, Transcriber, Transcript};
 use liberarr_infra::ai::OpenAiCompat;
+use liberarr_infra::anthropic::AnthropicLlm;
+use liberarr_infra::claude_cli::ClaudeCli;
 use liberarr_infra::mistral::MistralTranscriber;
 
 const MISTRAL_BASE: &str = "https://api.mistral.ai/v1";
 const OPENAI_BASE: &str = "https://api.openai.com/v1";
+const ANTHROPIC_BASE: &str = "https://api.anthropic.com";
 const MISTRAL_MODELS: [&str; 4] = [
     "voxtral-mini-latest",
     "voxtral-mini-transcribe-3",
@@ -58,6 +64,43 @@ async fn show_chat(label: &str, llm: &impl Llm) {
     }
 }
 
+/// Runs the real summary prompt on a synthetic French/English transcript and reports only whether
+/// the reply passes the summary validator.
+async fn show_summary(label: &str, llm: &impl Llm) {
+    let lines = [
+        "Bonjour à tous, on fait le point sur la release de vendredi.",
+        "Alice: the CI pipeline is green, we just need the security review.",
+        "Bob: je m'occupe de la review avant jeudi.",
+        "Alice: great, and I will update the changelog.",
+    ];
+    let segments: Vec<Segment> = lines
+        .iter()
+        .enumerate()
+        .map(|(i, t)| Segment {
+            start: i as f64 * 10.0,
+            end: i as f64 * 10.0 + 9.0,
+            text: (*t).into(),
+        })
+        .collect();
+    let transcript = Transcript {
+        engine: "probe".into(),
+        language: None,
+        text: lines.join(" "),
+        segments,
+        has_timestamps: true,
+    };
+    match llm
+        .complete_json(&summary_messages(&transcript, Language::En))
+        .await
+    {
+        Ok(text) => match parse_summary(&text) {
+            Ok(s) => println!("{label}: ok summary=valid actions={}", s.actions.len()),
+            Err(e) => println!("{label}: ok summary=invalid ({e})"),
+        },
+        Err(e) => println!("{label}: error {e}"),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let audio = match var("PROBE_AUDIO") {
@@ -97,6 +140,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         _ => println!("openai transcription: skipped"),
+    }
+    match (var("OPENAI_API_KEY"), var("OPENAI_CHAT_MODEL")) {
+        (Some(key), Some(model)) => {
+            let llm = OpenAiCompat::new(OPENAI_BASE.into(), key, model, true);
+            show_chat("openai/chat", &llm).await;
+            show_summary("openai/summary", &llm).await;
+        }
+        _ => println!("openai chat: skipped"),
+    }
+
+    match var("ANTHROPIC_API_KEY") {
+        Some(key) => {
+            let model = var("ANTHROPIC_MODEL").unwrap_or_else(|| "claude-sonnet-5-5".into());
+            let llm = AnthropicLlm::new(ANTHROPIC_BASE.into(), key, model);
+            show_chat("anthropic/chat", &llm).await;
+            show_summary("anthropic/summary", &llm).await;
+        }
+        None => println!("anthropic: skipped"),
+    }
+
+    match var("PROBE_CLAUDE_CLI") {
+        Some(model) => {
+            let llm = ClaudeCli::new(model);
+            show_chat("claude-cli/chat", &llm).await;
+            show_summary("claude-cli/summary", &llm).await;
+        }
+        None => println!("claude cli: skipped"),
     }
     Ok(())
 }

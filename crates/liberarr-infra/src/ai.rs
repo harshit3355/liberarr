@@ -83,9 +83,11 @@ pub(crate) fn chunk_result(r: &Value) -> Result<ChunkResult> {
         })
         .unwrap_or_default();
     Ok(ChunkResult {
-        // `gpt-transcribe` replies with a `languages` array instead.
+        // `gpt-transcribe` replies with a `languages` array of `{code}` objects instead; some
+        // compatible gateways send plain strings.
         language: r
             .get("language")
+            .or_else(|| r.pointer("/languages/0/code"))
             .or_else(|| r.pointer("/languages/0"))
             .and_then(Value::as_str)
             .map(String::from),
@@ -148,13 +150,19 @@ impl Llm for OpenAiCompat {
                     .body(body.to_string())
             })
             .await?;
-        if r.pointer("/choices/0/finish_reason")
+        match r
+            .pointer("/choices/0/finish_reason")
             .and_then(Value::as_str)
-            == Some("content_filter")
         {
-            return Err(Error::Provider(
-                "reply cut by the provider's content filter".into(),
-            ));
+            Some("content_filter") => {
+                return Err(Error::Provider(
+                    "reply cut by the provider's content filter".into(),
+                ));
+            }
+            Some("length") => {
+                return Err(Error::Provider("reply cut at the token limit".into()));
+            }
+            _ => {}
         }
         r.pointer("/choices/0/message/content")
             .and_then(Value::as_str)
@@ -204,7 +212,9 @@ mod tests {
             )
             .route(
                 "/plain/audio/transcriptions",
-                post(|req: Request| transcription(req, r#"{"text":"Bonjour"}"#)),
+                post(|req: Request| {
+                    transcription(req, r#"{"text":"Bonjour","languages":[{"code":"fr"}]}"#)
+                }),
             )
             .route(
                 "/html/audio/transcriptions",
@@ -216,6 +226,15 @@ mod tests {
                     (
                         StatusCode::OK,
                         r#"{"choices":[{"finish_reason":"content_filter","message":{"content":"{\"half\":"}}]}"#,
+                    )
+                }),
+            )
+            .route(
+                "/length/chat/completions",
+                post(|| async {
+                    (
+                        StatusCode::OK,
+                        r#"{"choices":[{"finish_reason":"length","message":{"content":"{\"half\":"}}]}"#,
                     )
                 }),
             )
@@ -271,8 +290,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            (r.language, r.text.as_str(), r.segments.len()),
-            (None, "Bonjour", 0)
+            (r.language.as_deref(), r.text.as_str(), r.segments.len()),
+            (Some("fr"), "Bonjour", 0)
         );
 
         let err = client("denied")
@@ -287,11 +306,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn content_filter_cut_is_an_error() {
+    async fn cut_reply_is_an_error() {
         let base = serve().await;
-        let llm = OpenAiCompat::new(format!("{base}/filter"), KEY.into(), "m".into(), true);
-        let msg = llm.complete_json(&[]).await.unwrap_err().to_string();
-        assert!(msg.contains("content filter"), "{msg}");
+        for (path, expected) in [("filter", "content filter"), ("length", "token limit")] {
+            let llm = OpenAiCompat::new(format!("{base}/{path}"), KEY.into(), "m".into(), true);
+            let msg = llm.complete_json(&[]).await.unwrap_err().to_string();
+            assert!(msg.contains(expected), "{msg}");
+        }
     }
 
     /// Privacy and money guard: with routing, chat and transcription requests name the allowed
