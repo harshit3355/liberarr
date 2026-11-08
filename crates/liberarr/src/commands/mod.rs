@@ -4,6 +4,7 @@ pub mod init;
 pub mod link;
 pub mod process;
 pub mod pull;
+pub mod rerun;
 pub mod serve;
 pub mod status;
 

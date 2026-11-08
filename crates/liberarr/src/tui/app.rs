@@ -5,7 +5,7 @@ use super::{LOGO, MIN_HEIGHT, MIN_WIDTH, motion, spinner, theme};
 use crate::commands::pull::{Transfer, mb, pull};
 use crate::config::Config;
 use crate::container::{self, App};
-use liberarr_core::jobs::{JobInfo, JobQueue, JobStatus, STEPS, run_job_once};
+use liberarr_core::jobs::{JobInfo, JobQueue, JobStatus, Rerun, STEPS, rerun, run_job_once};
 use liberarr_core::recordings::{RecordingItem, RecordingStatus};
 use liberarr_core::summaries::MeetingSummary;
 use liberarr_core::transcription::{Transcript, timestamp};
@@ -169,11 +169,6 @@ fn local(t: jiff::Timestamp) -> String {
     t.to_zoned(jiff::tz::TimeZone::system())
         .strftime("%Y-%m-%d %H:%M")
         .to_string()
-}
-
-fn busy(jobs: &[JobInfo]) -> bool {
-    jobs.iter()
-        .any(|j| matches!(j.status, JobStatus::Queued | JobStatus::Running))
 }
 
 impl Ui {
@@ -383,10 +378,9 @@ impl Ui {
         let Some(id) = self.current_id() else {
             return Ok(());
         };
-        if busy(&self.rt.block_on(self.app.jobs(id))?) {
+        if self.rt.block_on(rerun(&self.app.db, id, Some(step)))? == Rerun::Busy {
             self.toast(t!("tui.rerun_busy").into_owned(), theme::warn());
         } else {
-            self.rt.block_on(self.app.enqueue(id, step))?;
             self.toast(
                 t!("tui.rerun_queued", step = step).into_owned(),
                 theme::ok(),

@@ -53,6 +53,13 @@ enum Cmd {
         #[arg(required = true)]
         files: Vec<PathBuf>,
     },
+    /// Queue a pipeline step of a recording again: the failed one, or `--step`. Runs in `serve`,
+    /// `tui` or the next `pull`/`process`; prior outputs are kept until the step succeeds.
+    Rerun {
+        id: i64,
+        #[arg(long, value_parser = liberarr_core::jobs::STEPS)]
+        step: Option<String>,
+    },
     /// Start the web UI and API, with the job worker.
     Serve {
         /// Address to bind; 0.0.0.0 exposes the UI on the network.
@@ -94,6 +101,7 @@ fn run(cmd: Cmd) -> commands::Outcome {
         match cmd {
             Cmd::Pull { no_process } => commands::pull::run(&app, no_process).await,
             Cmd::Process { files } => commands::process::run(&app, &files).await,
+            Cmd::Rerun { id, step } => commands::rerun::run(&app, id, step.as_deref()).await,
             Cmd::Serve { host, port } => commands::serve::run(app, host, port).await,
             Cmd::Status => commands::status::run(&app).await,
             Cmd::Init { .. } | Cmd::Link { .. } | Cmd::Tui => unreachable!("handled above"),

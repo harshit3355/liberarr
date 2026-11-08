@@ -6,7 +6,7 @@ use axum::http::{StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use liberarr_core::Error;
-use liberarr_core::jobs::{JobInfo, JobStatus, STEPS};
+use liberarr_core::jobs::{JobInfo, JobStatus, STEPS, busy};
 use liberarr_core::recordings::{RecordingItem, RecordingStatus};
 use liberarr_core::summaries::{Action, MeetingSummary};
 use liberarr_core::transcription::Transcript;
@@ -270,13 +270,7 @@ pub async fn rerun<B: Backend>(
     s.backend.recording(id).await?.ok_or(NOT_FOUND)?;
     // A double click, or a rerun while the pipeline runs, must not run the chain (AI calls) twice.
     // shortcut: check-then-enqueue is not atomic; two simultaneous requests could both pass.
-    let busy = s
-        .backend
-        .jobs(id)
-        .await?
-        .iter()
-        .any(|j| matches!(j.status, JobStatus::Queued | JobStatus::Running));
-    if !busy {
+    if !busy(&s.backend.jobs(id).await?) {
         s.backend.enqueue(id, step).await?;
     }
     Ok(StatusCode::ACCEPTED)

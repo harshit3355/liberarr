@@ -49,6 +49,39 @@ pub trait JobQueue {
     async fn list_for(&self, recording_id: i64) -> Result<Vec<JobInfo>>;
 }
 
+/// A recording with a queued or running job: a second run would call the AI twice.
+pub fn busy(jobs: &[JobInfo]) -> bool {
+    jobs.iter()
+        .any(|j| matches!(j.status, JobStatus::Queued | JobStatus::Running))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Rerun {
+    Queued(String),
+    Busy,
+    NothingFailed,
+}
+
+/// Queues `step`, or the failed step when `None`. Nothing while the recording is busy. The step
+/// overwrites prior outputs only when it succeeds.
+pub async fn rerun<Q: JobQueue>(q: &Q, recording_id: i64, step: Option<&str>) -> Result<Rerun> {
+    // shortcut: check-then-enqueue is not atomic; two simultaneous reruns could both pass.
+    let jobs = q.list_for(recording_id).await?;
+    if busy(&jobs) {
+        return Ok(Rerun::Busy);
+    }
+    let step = match step {
+        Some(s) => s.to_string(),
+        // The last job is the one that stopped the chain; an earlier failure was rerun since.
+        None => match jobs.last() {
+            Some(j) if j.status == JobStatus::Failed => j.step.clone(),
+            _ => return Ok(Rerun::NothingFailed),
+        },
+    };
+    q.enqueue(recording_id, &step).await?;
+    Ok(Rerun::Queued(step))
+}
+
 /// Runs one pipeline step for a job; the composition root dispatches on `job.step`.
 pub trait StepHandler {
     /// `Ok(false)` ends the chain there (e.g. no speech: nothing to summarize or export).
@@ -110,5 +143,27 @@ mod tests {
         assert_eq!(rows[1].1, JobStatus::Failed);
         assert_eq!(rows[1].2.as_deref(), Some("provider: boom"));
         assert!(!block_on(run_job_once(&q, &h)).unwrap());
+    }
+
+    #[test]
+    fn rerun_failed_step_once() {
+        let q = MemJobs::default();
+        block_on(q.enqueue(1, "transcribe")).unwrap();
+        assert_eq!(block_on(rerun(&q, 1, None)).unwrap(), Rerun::Busy);
+        block_on(run_job_once(&q, &FailAt("transcribe"))).unwrap();
+
+        assert_eq!(
+            block_on(rerun(&q, 1, None)).unwrap(),
+            Rerun::Queued("transcribe".into())
+        );
+        // No double enqueue while the rerun is queued.
+        assert_eq!(block_on(rerun(&q, 1, Some("export"))).unwrap(), Rerun::Busy);
+        assert_eq!(q.rows().len(), 2);
+        // Once the rerun succeeds, nothing is left failed.
+        block_on(run_job_once(&q, &FailAt("none"))).unwrap();
+        assert_eq!(q.rows().len(), 3, "success chains to summarize");
+        block_on(run_job_once(&q, &FailAt("none"))).unwrap();
+        block_on(run_job_once(&q, &FailAt("none"))).unwrap();
+        assert_eq!(block_on(rerun(&q, 1, None)).unwrap(), Rerun::NothingFailed);
     }
 }

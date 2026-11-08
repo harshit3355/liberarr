@@ -35,6 +35,7 @@ liberarr tui     # or the full-screen terminal app
 | `link [--force]` | Paste your Plaud web-app token (hidden prompt). To find it: log in at web.plaud.ai, then in the browser DevTools open Application → Cookies and copy the `pld_ut` value. The token is used for this run only and never stored. Fetches the device keys; a key pair already stored is only replaced with `--force`. |
 | `pull [--no-process]` | Wake the device and close the Plaud app on your phone first. Resumes dropped downloads, never pulls the same recording twice, skips a recording still in progress. |
 | `process <files…>` | Run the pipeline on local audio files. |
+| `rerun <id> [--step transcribe\|summarize\|export]` | Queue a step of a recording again; without `--step`, the failed one (error if none failed). Refused while the recording is queued or running. Prior outputs are kept until the step succeeds. The step runs in `serve` or `tui`, or with the next `pull` or `process`. |
 | `serve [--host] [--port]` | Web UI and API, with the job worker. |
 | `status` | Known devices, last pull, queued and failed work. |
 | `tui` | Full-screen terminal app: recordings and their status, summary, timestamped transcript, mind map, actions to tick, jobs, rerun of a step, pull from the device with progress, settings. Starts with the setup when there is no configuration yet. Runs the job worker; `serve` can run at the same time. Keys are shown at the bottom of each screen. |
