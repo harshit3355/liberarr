@@ -2,6 +2,7 @@
 docs/superpowers/
 .superpowers/
 .claude-flow/
+graphify-out/
 
 # Local state and secrets
 .env
