@@ -42,7 +42,7 @@ cargo build --release
 ./target/release/liberarr --version
 ```
 
-Contributors can also use `cargo install --path crates/liberarr --locked` after the web build. Rules for contributors and AI agents: see [AGENTS.md](AGENTS.md).
+To get both versions in one command with [mise](https://mise.jdx.dev), see [Development setup](docs/development.md). Contributors can also use `cargo install --path crates/liberarr --locked` after the web build. Rules for contributors and AI agents: see [AGENTS.md](AGENTS.md).
 
 ## License
 
