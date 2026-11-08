@@ -152,3 +152,6 @@ tui.pull_ready: "Gardez votre Plaud Note Pro à proximité et allumé, puis appu
 tui.pull_downloading: "Téléchargement de l'enregistrement du %{label} (n°%{count})"
 tui.pull_finished: "Récupération terminée. Les nouveaux enregistrements sont traités en arrière-plan."
 tui.rerun_title: " Relancer depuis "
+no_speech.marker: "aucune parole"
+no_speech.detail: "Aucune parole détectée : ni résumé ni note."
+no_speech.status: "Sans parole (ni résumé ni note) : %{count}"

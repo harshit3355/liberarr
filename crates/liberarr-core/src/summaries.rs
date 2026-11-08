@@ -119,19 +119,23 @@ pub struct Summarize<'a, T, L, S> {
 
 impl<T: TranscriptRepo, L: Llm, S: SummaryRepo> Summarize<'_, T, L, S> {
     /// One retry with the validation error appended, then `InvalidSummary`. Nothing is saved on failure.
-    pub async fn run(&self, recording_id: i64) -> Result<MeetingSummary> {
+    /// `None` without calling the LLM when the transcript has no speech.
+    pub async fn run(&self, recording_id: i64) -> Result<Option<MeetingSummary>> {
         let t = self
             .transcripts
             .get(recording_id)
             .await?
             .ok_or_else(|| Error::NotFound("transcript".into()))?;
+        if !t.has_speech() {
+            return Ok(None);
+        }
         let mut messages = summary_messages(&t, self.lang);
         for attempt in 0..2 {
             let reply = self.llm.complete_json(&messages).await?;
             match parse_summary(&reply) {
                 Ok(s) => {
                     self.summaries.save(recording_id, &s).await?;
-                    return Ok(s);
+                    return Ok(Some(s));
                 }
                 Err(e) if attempt == 1 => return Err(e.into()),
                 Err(e) => {

@@ -58,6 +58,8 @@ pub struct RecordingItem {
     pub created_at: jiff::Timestamp,
     pub status: RecordingStatus,
     pub failed_step: Option<String>,
+    /// Done with an empty transcript: no summary and no note were made.
+    pub no_speech: bool,
 }
 
 pub trait RecordingRepo {

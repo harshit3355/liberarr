@@ -25,6 +25,8 @@
     "stepFailedWithError": "Step “{{step}}” failed: {{error}}",
     "retry": "Retry",
     "retryError": "Unable to retry the step.",
+    "noSpeech": "No speech",
+    "noSpeechDetail": "No speech detected: no summary or note was made.",
     "status": {
       "processing": "In progress",
       "failed": "Failed",

@@ -28,6 +28,13 @@ pub struct Transcript {
     pub has_timestamps: bool,
 }
 
+impl Transcript {
+    /// False for a silent recording: the summary and the note are skipped, the transcript is kept.
+    pub fn has_speech(&self) -> bool {
+        !self.text.trim().is_empty()
+    }
+}
+
 /// `mm:ss`, minutes not wrapped at 60.
 pub fn timestamp(seconds: f64) -> String {
     let s = seconds.max(0.0) as u64;

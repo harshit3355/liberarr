@@ -47,5 +47,9 @@ pub async fn run(app: &App) -> Outcome {
             failed = count(RecordingStatus::Failed)
         )
     );
+    let silent = items.iter().filter(|i| i.no_speech).count();
+    if silent > 0 {
+        println!("{}", t!("no_speech.status", count = silent));
+    }
     Ok(ExitCode::SUCCESS)
 }

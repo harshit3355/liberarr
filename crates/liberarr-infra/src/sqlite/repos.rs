@@ -116,13 +116,16 @@ impl RecordingRepo for Db {
     }
 
     /// Latest job decides the status; the summary title wins over the recording title.
+    /// "No speech" is derived from the stored transcript, not stored on its own.
     async fn list_items(&self) -> Result<Vec<RecordingItem>> {
         self.run(|c| {
             let mut stmt = c.prepare(
                 "SELECT r.id, COALESCE(s.title, r.title), r.source, r.duration_s, r.created_at,
-                        j.status, CASE WHEN j.status = 'failed' THEN j.step END
+                        j.status, CASE WHEN j.status = 'failed' THEN j.step END,
+                        COALESCE(trim(t.text, char(32, 9, 10, 13)) = '', 0)
                  FROM recordings r
                  LEFT JOIN summaries s ON s.recording_id = r.id
+                 LEFT JOIN transcripts t ON t.recording_id = r.id
                  LEFT JOIN jobs j ON j.id = (SELECT MAX(id) FROM jobs WHERE recording_id = r.id)
                  ORDER BY r.created_at DESC, r.id DESC",
             )?;
@@ -138,8 +141,9 @@ impl RecordingRepo for Db {
                     source: parse_source(2, &r.get::<_, String>(2)?)?,
                     duration_s: r.get(3)?,
                     created_at: parse_ts(4, &r.get::<_, String>(4)?)?,
-                    status,
                     failed_step: r.get(6)?,
+                    no_speech: status == RecordingStatus::Done && r.get(7)?,
+                    status,
                 })
             })?
             .collect()

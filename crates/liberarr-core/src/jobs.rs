@@ -51,7 +51,8 @@ pub trait JobQueue {
 
 /// Runs one pipeline step for a job; the composition root dispatches on `job.step`.
 pub trait StepHandler {
-    async fn run(&self, job: &Job) -> Result<()>;
+    /// `Ok(false)` ends the chain there (e.g. no speech: nothing to summarize or export).
+    async fn run(&self, job: &Job) -> Result<bool>;
 }
 
 /// Claims and runs one job. `Ok(false)` when the queue is empty. A handler error is recorded on
@@ -61,7 +62,10 @@ pub async fn run_job_once<Q: JobQueue, H: StepHandler>(q: &Q, handlers: &H) -> R
         return Ok(false);
     };
     match handlers.run(&job).await {
-        Ok(()) => q.complete(&job, next_step(&job.step)).await?,
+        Ok(go_on) => {
+            q.complete(&job, next_step(&job.step).filter(|_| go_on))
+                .await?
+        }
         Err(e) => {
             let msg: String = e.to_string().chars().take(MAX_ERROR).collect();
             q.fail(&job, &msg).await?;
@@ -79,11 +83,11 @@ mod tests {
     /// Fails the chosen step, succeeds on the others.
     struct FailAt(&'static str);
     impl StepHandler for FailAt {
-        async fn run(&self, job: &Job) -> Result<()> {
+        async fn run(&self, job: &Job) -> Result<bool> {
             if job.step == self.0 {
                 Err(Error::Provider("boom".into()))
             } else {
-                Ok(())
+                Ok(true)
             }
         }
     }

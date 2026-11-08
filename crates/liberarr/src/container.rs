@@ -163,20 +163,19 @@ pub fn partials(cfg: &Config) -> FsPartialStore {
 }
 
 impl StepHandler for App {
-    async fn run(&self, job: &Job) -> Result<()> {
+    async fn run(&self, job: &Job) -> Result<bool> {
         let id = job.recording_id;
         match job.step.as_str() {
-            "transcribe" => {
-                Transcribe {
-                    recordings: &self.db,
-                    splitter: &OggSplitter,
-                    transcriber: &self.transcriber,
-                    transcripts: &self.db,
-                    max_chunk_bytes: DEFAULT_UPLOAD_BYTES,
-                }
-                .run(id)
-                .await
+            "transcribe" => Transcribe {
+                recordings: &self.db,
+                splitter: &OggSplitter,
+                transcriber: &self.transcriber,
+                transcripts: &self.db,
+                max_chunk_bytes: DEFAULT_UPLOAD_BYTES,
             }
+            .run(id)
+            .await
+            .map(|()| true),
             "summarize" => Summarize {
                 transcripts: &self.db,
                 llm: &self.llm,
@@ -185,7 +184,8 @@ impl StepHandler for App {
             }
             .run(id)
             .await
-            .map(drop),
+            // No speech: no summary, so the chain stops before the export.
+            .map(|s| s.is_some()),
             "export" => ExportToObsidian {
                 recordings: &self.db,
                 transcripts: &self.db,
@@ -197,7 +197,7 @@ impl StepHandler for App {
             }
             .run(id)
             .await
-            .map(drop),
+            .map(|_| true),
             other => Err(Error::Unsupported(format!("unknown step `{other}`"))),
         }
     }

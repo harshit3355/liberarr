@@ -25,6 +25,8 @@
     "stepFailedWithError": "Échec de l'étape « {{step}} » : {{error}}",
     "retry": "Relancer",
     "retryError": "Impossible de relancer l'étape.",
+    "noSpeech": "Aucune parole",
+    "noSpeechDetail": "Aucune parole détectée : ni résumé ni note.",
     "status": {
       "processing": "En cours",
       "failed": "Échec",

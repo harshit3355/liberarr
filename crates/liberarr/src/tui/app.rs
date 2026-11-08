@@ -609,6 +609,11 @@ impl Ui {
             .iter()
             .map(|i| {
                 let (mark, style, note) = match i.status {
+                    RecordingStatus::Done if i.no_speech => (
+                        "○".to_string(),
+                        theme::dim(),
+                        t!("no_speech.marker").into_owned(),
+                    ),
                     RecordingStatus::Done => ("●".to_string(), theme::ok(), String::new()),
                     RecordingStatus::Processing => {
                         (spinner().to_string(), theme::accent(), String::new())
@@ -682,6 +687,7 @@ impl Ui {
                 .map_or_else(|| none("tui.no_summary"), |s| markdown(&s.summary_md)),
             Tab::Transcript => match &d.transcript {
                 None => none("tui.no_transcript"),
+                Some(t) if !t.has_speech() => none("no_speech.detail"),
                 Some(t) if t.segments.is_empty() => {
                     t.text.lines().map(|l| Line::raw(l.to_string())).collect()
                 }

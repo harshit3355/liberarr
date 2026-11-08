@@ -118,6 +118,7 @@ mod tests {
                 created_at: jiff::Timestamp::UNIX_EPOCH,
                 status: RecordingStatus::Done,
                 failed_step: None,
+                no_speech: false,
             }])
         }
         async fn recording(&self, id: i64) -> Result<Option<Recording>> {

@@ -3,6 +3,7 @@
 use axum::Router;
 use axum::routing::post;
 use liberarr_core::exports::{END, START};
+use liberarr_core::jobs::JobQueue;
 use liberarr_core::recordings::{RecordingRepo, RecordingStatus};
 use liberarr_core::summaries::SummaryRepo;
 use liberarr_core::transcription::TranscriptRepo;
@@ -69,13 +70,14 @@ fn synthetic_ogg() -> Vec<u8> {
 
 const SUMMARY: &str = r###"{"title":"Point hebdo","summary_md":"## Contexte\nTest.","mindmap":"mindmap\n  root((Point))\n    Budget","actions":[{"action":"Envoyer le budget","owner":"Alice","due":null,"start":1.0}]}"###;
 
-async fn mock_provider() -> String {
+const SPEECH: &str = r#"{"language":"french","text":"Bonjour. Hello.","segments":[{"start":0.0,"end":1.0,"text":"Bonjour."},{"start":1.0,"end":2.0,"text":"Hello."}]}"#;
+
+/// `transcript` is the transcription endpoint's reply.
+async fn mock_provider(transcript: &'static str) -> String {
     let app = Router::new()
         .route(
             "/v1/audio/transcriptions",
-            post(|| async {
-                r#"{"language":"french","text":"Bonjour. Hello.","segments":[{"start":0.0,"end":1.0,"text":"Bonjour."},{"start":1.0,"end":2.0,"text":"Hello."}]}"#
-            }),
+            post(move || async move { transcript }),
         )
         .route(
             "/v1/chat/completions",
@@ -121,15 +123,16 @@ fn patch_action(port: u16, index: usize) -> u16 {
     .unwrap()
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn process_e2e() {
+/// A fresh home (named after the test: tests run in parallel) whose `.env` points both steps at a
+/// mock provider, plus a synthetic recording.
+async fn setup(test: &str, transcript: &'static str) -> (TempHome, PathBuf) {
     let home = TempHome(std::env::temp_dir().join(format!(
-        "liberarr-e2e-{}-{}",
+        "liberarr-{test}-{}-{}",
         std::process::id(),
         jiff::Timestamp::now().as_nanosecond()
     )));
     std::fs::create_dir_all(&home.0).unwrap();
-    let base = mock_provider().await;
+    let base = mock_provider(transcript).await;
     std::fs::write(
         home.0.join(".env"),
         format!(
@@ -147,7 +150,12 @@ async fn process_e2e() {
     .unwrap();
     let audio = home.0.join("meeting.ogg");
     std::fs::write(&audio, synthetic_ogg()).unwrap();
+    (home, audio)
+}
 
+#[tokio::test(flavor = "multi_thread")]
+async fn process_e2e() {
+    let (home, audio) = setup("e2e", SPEECH).await;
     let out = liberarr(&home.0)
         .arg("process")
         .arg(&audio)
@@ -202,4 +210,50 @@ async fn process_e2e() {
     assert!(up, "serve did not come up");
     assert_eq!(in_range, 200);
     assert_eq!(out_of_range, 404);
+}
+
+/// Silence: the empty transcript is kept, the LLM is not called, no note is written, and the
+/// recording ends Done with the "no speech" marker.
+#[tokio::test(flavor = "multi_thread")]
+async fn process_no_speech() {
+    let (home, audio) = setup(
+        "no-speech",
+        r#"{"language":null,"text":"  ","segments":[]}"#,
+    )
+    .await;
+    let out = liberarr(&home.0)
+        .arg("process")
+        .arg(&audio)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "process failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let db = Db::open(&home.0.join("liberarr.db")).unwrap();
+    let items = db.list_items().await.unwrap();
+    assert_eq!(items[0].status, RecordingStatus::Done);
+    assert!(items[0].no_speech);
+    let id = items[0].id;
+    assert_eq!(
+        TranscriptRepo::get(&db, id).await.unwrap().unwrap().text,
+        ""
+    );
+    assert!(SummaryRepo::get(&db, id).await.unwrap().is_none());
+    let steps: Vec<String> = db
+        .list_for(id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|j| j.step)
+        .collect();
+    assert_eq!(
+        steps,
+        ["transcribe", "summarize"],
+        "the chain stops before the export"
+    );
+    let notes = std::fs::read_dir(home.0.join("obsidian")).map_or(0, |d| d.count());
+    assert_eq!(notes, 0);
 }

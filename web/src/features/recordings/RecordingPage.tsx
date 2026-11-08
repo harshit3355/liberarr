@@ -74,6 +74,12 @@ export function RecordingPage() {
         </p>
       )}
 
+      {rec.no_speech && (
+        <p role="status" className="text-sm text-zinc-300">
+          {t('recordings.noSpeechDetail')}
+        </p>
+      )}
+
       <audio
         ref={audio}
         controls

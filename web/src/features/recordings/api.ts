@@ -11,6 +11,7 @@ export interface RecordingItem {
   created_at: string
   status: Status
   failed_step: string | null
+  no_speech: boolean
 }
 
 export interface Segment {

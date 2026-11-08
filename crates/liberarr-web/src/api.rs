@@ -114,6 +114,7 @@ pub struct ItemView {
     created_at: String,
     status: &'static str,
     failed_step: Option<String>,
+    no_speech: bool,
 }
 
 impl From<RecordingItem> for ItemView {
@@ -130,6 +131,7 @@ impl From<RecordingItem> for ItemView {
                 RecordingStatus::Done => "done",
             },
             failed_step: i.failed_step,
+            no_speech: i.no_speech,
         }
     }
 }

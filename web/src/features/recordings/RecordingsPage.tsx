@@ -38,7 +38,11 @@ export function RecordingsPage() {
                 <span className="w-16 text-right font-mono text-sm text-zinc-300">
                   {r.duration_s != null ? formatTimestamp(r.duration_s) : '—'}
                 </span>
-                <span className={`rounded-full px-2 py-0.5 text-xs ${BADGE[r.status]}`}>{t(`recordings.status.${r.status}`)}</span>
+                {r.no_speech ? (
+                  <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-200">{t('recordings.noSpeech')}</span>
+                ) : (
+                  <span className={`rounded-full px-2 py-0.5 text-xs ${BADGE[r.status]}`}>{t(`recordings.status.${r.status}`)}</span>
+                )}
               </Link>
             </li>
           ))}
