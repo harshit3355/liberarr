@@ -33,6 +33,13 @@ pub struct MeetingSummary {
 
 /// LLM output is untrusted: it must be the exact JSON shape with a Mermaid mindmap.
 pub fn parse_summary(text: &str) -> Result<MeetingSummary, InvalidSummary> {
+    // Claude models (no forced JSON mode) often wrap the reply in a ```json fence.
+    let text = text.trim();
+    let text = text
+        .strip_prefix("```json")
+        .or_else(|| text.strip_prefix("```"))
+        .and_then(|t| t.strip_suffix("```"))
+        .unwrap_or(text);
     // serde messages can quote the model's text (summary content), so keep only category and position.
     let mut s: MeetingSummary = serde_json::from_str(text).map_err(|e| {
         InvalidSummary(format!(
@@ -180,6 +187,20 @@ mod tests {
         assert!(parse_summary(json).is_err());
         let ok = r#"{"title":"t","summary_md":"s","mindmap":"mindmap\n  root","actions":[{"action":"x"}]}"#;
         assert_eq!(parse_summary(ok).unwrap().actions[0].owner, None);
+    }
+
+    #[test]
+    fn parse_summary_strips_code_fence() {
+        let json = r#"{"title":"t","summary_md":"s","mindmap":"mindmap\n  root","actions":[]}"#;
+        let expected = parse_summary(json).unwrap();
+        for fenced in [
+            format!("```json\n{json}\n```"),
+            format!("  ```\n{json}\n```\n"),
+        ] {
+            assert_eq!(parse_summary(&fenced).unwrap(), expected);
+        }
+        let err = parse_summary("```json\nsecret garbage\n```").unwrap_err();
+        assert!(!err.0.contains("secret"));
     }
 
     #[test]
