@@ -8,7 +8,7 @@ mod plain;
 #[cfg(test)]
 mod tests;
 
-pub use check::connect;
+pub use check::{connect, routes};
 pub use noninteractive::from_env;
 pub use plain::PlainPrompter;
 
@@ -25,6 +25,8 @@ pub type Updates = Vec<(&'static str, String)>;
 /// Tests what the account can do: for an API provider, the models it lists; for `claude`, whether
 /// the CLI is signed in (empty list). The error text never carries the key.
 pub type Checker<'a> = dyn Fn(Provider, &str, &str) -> Result<Vec<String>, String> + 'a;
+/// The providers that serve an OpenRouter model `(base URL, key, model)`, as routing slugs.
+pub type Routes<'a> = dyn Fn(&str, &str, &str) -> Result<Vec<String>, String> + 'a;
 
 /// One line of a menu: the value that is returned (and can be typed) and a short note.
 pub struct Choice {
@@ -138,19 +140,61 @@ fn ask_url(p: &mut dyn Prompter, question: &str, default: Option<&str>) -> Setup
     Err(t!("setup.aborted").into_owned().into())
 }
 
-/// Asks for the optional OpenRouter provider list until it is valid, at most [`KEY_TRIES`] times.
-/// Returns the normalized list, empty for no restriction (`-`; the prompt never returns an empty
-/// string, so the default is `-` when there is no current list).
-fn ask_routing(p: &mut dyn Prompter, default: Option<&str>) -> SetupResult<String> {
+/// The OpenRouter provider list of a step.
+pub(crate) fn routing_var(step: Step) -> &'static str {
+    match step {
+        Step::Transcribe => "LIBERARR_TRANSCRIBE_ROUTING_ONLY",
+        Step::Summarize => "LIBERARR_LLM_ROUTING_ONLY",
+    }
+}
+
+/// Asks for the optional OpenRouter provider list until it is valid, at most [`KEY_TRIES`] times:
+/// a menu of the providers serving the model when known (a list can still be typed), else a
+/// question. Returns the normalized list, empty for no restriction (`-`). With no current list,
+/// the menu has no default: restricting or not is an explicit choice.
+fn ask_routing(
+    p: &mut dyn Prompter,
+    var: &str,
+    model: &str,
+    offered: &[String],
+    current: Option<&str>,
+) -> SetupResult<String> {
+    let mut values: Vec<String> = offered.to_vec();
+    if let Some(c) = current.filter(|c| !values.iter().any(|v| v == c)) {
+        values.insert(0, c.to_string());
+    }
+    let mut choices: Vec<Choice> = values
+        .iter()
+        .map(|v| Choice {
+            value: v.clone(),
+            note: if Some(v.as_str()) == current {
+                t!("setup.current").into_owned()
+            } else {
+                String::new()
+            },
+        })
+        .collect();
+    choices.push(Choice {
+        value: "-".into(),
+        note: t!("setup.routing_none").into_owned(),
+    });
     for _ in 0..KEY_TRIES {
-        let v = p.text(&t!("init.summarize.routing"), Some(default.unwrap_or("-")))?;
+        let v = if offered.is_empty() {
+            p.text(&t!("setup.routing"), Some(current.unwrap_or("-")))?
+        } else {
+            let default = current.map(|c| values.iter().position(|v| v == c).unwrap_or(0));
+            match p.choose(&t!("setup.routing_menu", model = model), &choices, default)? {
+                Picked::Option(i) => choices[i].value.clone(),
+                Picked::Text(t) => t,
+            }
+        };
         if v.trim() == "-" {
             return Ok(String::new());
         }
         if let Some(list) = parse_routing(&v) {
             return Ok(list.join(","));
         }
-        p.warn(&t!("config.routing_invalid", var = ROUTING_ONLY));
+        p.warn(&t!("config.routing_invalid", var = var));
     }
     Err(t!("setup.aborted").into_owned().into())
 }
@@ -207,10 +251,11 @@ pub fn run_setup(
     env: &HashMap<String, String>,
     ui: Language,
     check: &Checker,
+    routes: &Routes,
 ) -> SetupResult<Plan> {
     let mut plan = secrets(env)?;
     plan.updates
-        .extend(configure(p, env, Mode::Fill, ui, check)?);
+        .extend(configure(p, env, Mode::Fill, ui, check, routes)?);
     if plan.updates.is_empty() && p.is_interactive() {
         let options = [
             Choice {
@@ -223,7 +268,7 @@ pub fn run_setup(
             },
         ];
         if let Picked::Option(1) = p.choose(&t!("setup.existing"), &options, Some(0))? {
-            plan.updates = configure(p, env, Mode::Reconfigure, ui, check)?;
+            plan.updates = configure(p, env, Mode::Reconfigure, ui, check, routes)?;
         }
     }
     Ok(plan)
@@ -242,6 +287,7 @@ fn configure(
     mode: Mode,
     ui: Language,
     check: &Checker,
+    routes: &Routes,
 ) -> SetupResult<Updates> {
     let reconf = mode == Mode::Reconfigure;
     let mut updates = Updates::new();
@@ -269,19 +315,6 @@ fn configure(
         let (default_url, default_model) = providers::defaults(provider, step);
         let own = |k: &str| current(env, k).filter(|_| !changed);
 
-        // Optional, so an empty answer is written (`KEY=`): its absence means "not asked yet".
-        if provider == Provider::OpenRouter && (reconf || !env.contains_key(ROUTING_ONLY)) {
-            let routing = ask_routing(p, own(ROUTING_ONLY).as_deref())?;
-            if routing.is_empty() {
-                p.warn(&t!("init.openrouter_unrestricted"));
-            } else {
-                p.info(&t!("init.openrouter_shared_capacity"));
-            }
-            if env.get(ROUTING_ONLY).map(|v| v.trim()) != Some(routing.as_str()) {
-                updates.push((ROUTING_ONLY, routing));
-            }
-        }
-
         // The claude CLI has its own login: no URL, no key.
         let needs_api = provider != Provider::Claude;
         let mut url = own(url_var).unwrap_or_default();
@@ -293,16 +326,17 @@ fn configure(
 
         let model_asked = reconf || current(env, model_var).is_none();
         let mut found = Vec::new();
+        let mut key = own(key_var).unwrap_or_default();
         if needs_api {
             let ask_key =
-                own(key_var).is_none() || (reconf && p.confirm(&t!("setup.change_key"), false)?);
+                key.is_empty() || (reconf && p.confirm(&t!("setup.change_key"), false)?);
             if ask_key {
-                let (key, models) = ask_key_tested(p, &t!(key_q), provider, &url, check)?;
-                set(&mut updates, env, key_var, key);
+                let (typed, models) = ask_key_tested(p, &t!(key_q), provider, &url, check)?;
+                key = typed.clone();
+                set(&mut updates, env, key_var, typed);
                 found = models;
             } else if model_asked {
                 // The stored key still feeds the model list; a failure only costs the live list.
-                let key = own(key_var).unwrap_or_default();
                 found = test(p, check, provider, &url, &key).unwrap_or_else(|why| {
                     p.warn(&t!("setup.check_failed", why = why));
                     Vec::new()
@@ -312,10 +346,10 @@ fn configure(
             p.warn(&t!("setup.claude_not_ready"));
         }
 
-        if model_asked {
-            // OpenRouter lists hundreds of models: the question gives an example instead.
-            let model_q = match provider {
-                Provider::OpenRouter => "init.summarize.model_openrouter",
+        let model = if model_asked {
+            // OpenRouter lists hundreds of chat models: the question gives an example instead.
+            let model_q = match (provider, step) {
+                (Provider::OpenRouter, Step::Summarize) => "init.summarize.model_openrouter",
                 _ => model_q,
             };
             let model = ask_model(
@@ -330,7 +364,31 @@ fn configure(
             if let Some(w) = providers::warning(capability(provider, &model), step) {
                 p.info(&t!("init.attention", warning = w));
             }
-            set(&mut updates, env, model_var, model);
+            set(&mut updates, env, model_var, model.clone());
+            model
+        } else {
+            current(env, model_var).unwrap_or_default()
+        };
+
+        // Asked after the model: the menu lists the providers that serve it. Optional, so an
+        // empty answer is written (`KEY=`): its absence means "not asked yet".
+        let var = routing_var(step);
+        if provider == Provider::OpenRouter && (reconf || !env.contains_key(var)) {
+            let mut offered = Ok(Vec::new());
+            p.busy(&t!("setup.routing_loading"), &mut || {
+                offered = routes(&url, &key, &model);
+            });
+            // Unknown model or no network: the question without a menu still works.
+            let offered = offered.unwrap_or_default();
+            let routing = ask_routing(p, var, &model, &offered, own(var).as_deref())?;
+            if routing.is_empty() {
+                p.warn(&t!("init.openrouter_unrestricted"));
+            } else {
+                p.info(&t!("init.openrouter_shared_capacity"));
+            }
+            if env.get(var).map(|v| v.trim()) != Some(routing.as_str()) {
+                updates.push((var, routing));
+            }
         }
     }
     // Asked once: left unset, the notes would change language with the OS locale.
@@ -347,7 +405,6 @@ fn configure(
     Ok(updates)
 }
 
-pub(crate) const ROUTING_ONLY: &str = "LIBERARR_LLM_ROUTING_ONLY";
 pub(crate) const CONTENT_LANGUAGE: &str = "LIBERARR_CONTENT_LANGUAGE";
 
 /// Language of the summaries and the note headings; defaults to the current value, else the UI's.

@@ -2,7 +2,7 @@
 //! (`LIBERARR_{TRANSCRIBE,LLM}_{PROVIDER,BASE_URL,API_KEY,MODEL}`), never from the command line.
 //! Same rules as the questions: a value already set in the `.env` wins and is never overwritten.
 use super::{
-    CONTENT_LANGUAGE, Plan, ROUTING_ONLY, STEPS, SetupResult, current, current_provider, secrets,
+    CONTENT_LANGUAGE, Plan, STEPS, SetupResult, current, current_provider, routing_var, secrets,
     valid_url,
 };
 use crate::config::{is_unset, parse_routing};
@@ -70,14 +70,15 @@ pub fn from_env(
         }
         want(model_var, default_model)?;
         // Optional: absent or empty means no restriction, written as an empty value.
-        if provider == Provider::OpenRouter && !existing.contains_key(ROUTING_ONLY) {
-            let list = match from_env(ROUTING_ONLY)? {
+        let var = routing_var(step);
+        if provider == Provider::OpenRouter && !existing.contains_key(var) {
+            let list = match from_env(var)? {
                 Some(v) => parse_routing(&v)
                     .map(|list| list.join(","))
-                    .ok_or_else(|| t!("config.routing_invalid", var = ROUTING_ONLY).into_owned())?,
+                    .ok_or_else(|| t!("config.routing_invalid", var = var).into_owned())?,
                 None => String::new(),
             };
-            plan.updates.push((ROUTING_ONLY, list));
+            plan.updates.push((var, list));
         }
     }
     if current(existing, CONTENT_LANGUAGE).is_none() {

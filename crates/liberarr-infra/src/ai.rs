@@ -18,7 +18,7 @@ pub struct OpenAiCompat {
     model: String,
     /// `verbose_json` (segments) or `json` (text only), for models that reject `verbose_json`.
     ask_segments: bool,
-    /// The `provider` object of a chat request (OpenRouter routing), when set.
+    /// The `provider` object of every request (OpenRouter routing), when set.
     routing: Option<Value>,
     http: reqwest::Client,
 }
@@ -35,7 +35,7 @@ impl OpenAiCompat {
         }
     }
 
-    /// Chat requests only go to these providers, with no fallback: OpenRouter's own shared models
+    /// Requests only go to these providers, with no fallback: OpenRouter's own shared models
     /// stay out of reach (`only` is the real guard; `allow_fallbacks: false` alone is not enough).
     pub fn with_routing(mut self, only: &[String]) -> Self {
         self.routing =
@@ -95,7 +95,7 @@ pub(crate) fn chunk_result(r: &Value) -> Result<ChunkResult> {
 impl Transcriber for OpenAiCompat {
     async fn transcribe(&self, audio: &[u8], filename: &str) -> Result<ChunkResult> {
         // No `language`: recordings mix French and English.
-        let form = Form::new()
+        let mut form = Form::new()
             .text("model", self.model.clone())
             .text(
                 "response_format",
@@ -109,6 +109,10 @@ impl Transcriber for OpenAiCompat {
                 "file",
                 Part::bytes(audio.to_vec()).file_name(filename.to_string()),
             );
+        // Multipart takes the routing object as a JSON-encoded field.
+        if let Some(routing) = &self.routing {
+            form = form.text("provider", routing.to_string());
+        }
         let r = self
             .send("audio/transcriptions", TRANSCRIBE_TIMEOUT, |b| {
                 b.multipart(form)
@@ -219,6 +223,18 @@ mod tests {
                 }),
             )
             .route(
+                "/echo/audio/transcriptions",
+                // Replies with the `provider` part it received (`null` if none), as the text.
+                post(|body: String| async move {
+                    let seen = body
+                        .split_once("name=\"provider\"\r\n\r\n")
+                        .and_then(|(_, rest)| rest.split_once("\r\n"))
+                        .map_or("null", |(v, _)| v)
+                        .to_string();
+                    json!({ "text": seen }).to_string()
+                }),
+            )
+            .route(
                 "/denied/audio/transcriptions",
                 post(|| async { (StatusCode::UNAUTHORIZED, r#"{"error":{"message":"Incorrect API key provided: sk-...abcd."}}"#) }),
             );
@@ -272,18 +288,23 @@ mod tests {
         assert!(msg.contains("content filter"), "{msg}");
     }
 
-    /// Privacy guard: with routing, a chat request names the allowed providers and forbids fallback;
-    /// without it, no `provider` field is sent.
+    /// Privacy and money guard: with routing, chat and transcription requests name the allowed
+    /// providers and forbid fallback; without it, no `provider` field is sent.
     #[tokio::test]
-    async fn chat_routing_is_sent_only_when_set() {
+    async fn routing_is_sent_only_when_set() {
         let base = serve().await;
-        let llm = OpenAiCompat::new(format!("{base}/echo"), KEY.into(), "m".into(), true);
-        assert_eq!(llm.complete_json(&[]).await.unwrap(), "null");
-        let routed = llm.with_routing(&["azure".to_string()]);
-        let seen: Value = serde_json::from_str(&routed.complete_json(&[]).await.unwrap()).unwrap();
-        assert_eq!(seen["only"], json!(["azure"]));
-        assert_eq!(seen["allow_fallbacks"], json!(false));
-        assert_eq!(seen["require_parameters"], json!(true));
+        let client = OpenAiCompat::new(format!("{base}/echo"), KEY.into(), "m".into(), true);
+        assert_eq!(client.complete_json(&[]).await.unwrap(), "null");
+        assert_eq!(client.transcribe(b"a", "c.ogg").await.unwrap().text, "null");
+        let routed = client.with_routing(&["azure".to_string()]);
+        let chat = routed.complete_json(&[]).await.unwrap();
+        let stt = routed.transcribe(b"a", "c.ogg").await.unwrap().text;
+        for seen in [chat, stt] {
+            let seen: Value = serde_json::from_str(&seen).unwrap();
+            assert_eq!(seen["only"], json!(["azure"]));
+            assert_eq!(seen["allow_fallbacks"], json!(false));
+            assert_eq!(seen["require_parameters"], json!(true));
+        }
     }
 
     #[tokio::test]

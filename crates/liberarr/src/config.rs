@@ -15,7 +15,8 @@ pub struct Profile {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
-    /// OpenRouter only: the provider slugs a request is restricted to (`LIBERARR_LLM_ROUTING_ONLY`).
+    /// OpenRouter only: the provider slugs a request is restricted to
+    /// (`LIBERARR_{TRANSCRIBE,LLM}_ROUTING_ONLY`).
     /// Empty: no restriction (and for every other provider).
     pub routing_only: Vec<String>,
 }

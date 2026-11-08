@@ -54,9 +54,13 @@ pub fn run(non_interactive: bool) -> Outcome {
         setup::from_env(&current, ui, |k| std::env::var(k).ok())?
     } else {
         let rt = tokio::runtime::Runtime::new()?;
-        setup::run_setup(&mut PlainPrompter, &current, ui, &|p, url, key| {
-            setup::connect(&rt, p, url, key)
-        })?
+        setup::run_setup(
+            &mut PlainPrompter,
+            &current,
+            ui,
+            &|p, url, key| setup::connect(&rt, p, url, key),
+            &|url, key, model| setup::routes(&rt, url, key, model),
+        )?
     };
     let setup::Plan { updates, password } = plan;
     if updates.is_empty() {

@@ -1,6 +1,6 @@
 //! Composition root: the one place where adapters are wired to the core ports.
 use crate::config::{Config, Profile};
-use liberarr_core::ai::{DEFAULT_UPLOAD_BYTES, Provider, Timestamps, capability};
+use liberarr_core::ai::{DEFAULT_UPLOAD_BYTES, Provider, Step, Timestamps, capability};
 use liberarr_core::exports::ExportToObsidian;
 use liberarr_core::jobs::{Job, JobInfo, JobQueue, StepHandler, run_job_once};
 use liberarr_core::recordings::{Ingest, Recording, RecordingItem, RecordingRepo};
@@ -49,7 +49,13 @@ fn transcriber(p: &Profile) -> AnyTranscriber {
             // Models known to return text only reject `verbose_json`.
             let ask_segments =
                 capability(provider, &p.model).transcription != Some(Timestamps::TextOnly);
-            AnyTranscriber::Compat(OpenAiCompat::new(url, key, model, ask_segments))
+            let t = OpenAiCompat::new(url, key, model, ask_segments);
+            AnyTranscriber::Compat(match provider {
+                Provider::OpenRouter if !p.routing_only.is_empty() => {
+                    t.with_routing(&p.routing_only)
+                }
+                _ => t,
+            })
         }
     }
 }
@@ -98,6 +104,18 @@ impl App {
         std::fs::create_dir_all(&cfg.home)
             .map_err(|e| Error::Storage(format!("create home: {}", e.kind())))?;
         let db = Db::open(&cfg.home.join("liberarr.db"))?;
+        for (step, p) in [
+            (Step::Transcribe, &cfg.transcribe),
+            (Step::Summarize, &cfg.llm),
+        ] {
+            if p.provider == Provider::OpenRouter && p.routing_only.is_empty() {
+                let var = crate::setup::routing_var(step);
+                eprintln!(
+                    "{}",
+                    rust_i18n::t!("config.openrouter_unrestricted", var = var)
+                );
+            }
+        }
         Ok(App {
             transcriber: transcriber(&cfg.transcribe),
             llm: llm(&cfg.llm),

@@ -75,6 +75,10 @@ fn ok(_: Provider, _: &str, _: &str) -> Result<Vec<String>, String> {
     Ok(vec![])
 }
 
+fn no_routes(_: &str, _: &str, _: &str) -> Result<Vec<String>, String> {
+    Err("offline".into())
+}
+
 fn written(plan: &Plan) -> HashMap<String, String> {
     parse_env(&merge(ENV, &plan.updates))
 }
@@ -86,7 +90,7 @@ fn set_values_are_never_overwritten_or_re_asked() {
     let env = parse_env(&partial);
     let mut p = Fake::default();
     p.choices.push_back(Picked::Text("my-model".into()));
-    let plan = run_setup(&mut p, &env, Language::En, &ok).unwrap();
+    let plan = run_setup(&mut p, &env, Language::En, &ok, &no_routes).unwrap();
     assert_eq!(
         plan.updates,
         [("LIBERARR_LLM_MODEL", "my-model".to_string())]
@@ -110,7 +114,7 @@ fn reconfigure_keeps_the_secrets_and_never_shows_a_secret() {
     ]);
     p.confirms.push_back(false);
     p.secrets.push_back(TYPED_KEY);
-    let plan = run_setup(&mut p, &env, Language::En, &ok).unwrap();
+    let plan = run_setup(&mut p, &env, Language::En, &ok, &no_routes).unwrap();
 
     let out = written(&plan);
     for k in SECRETS {
@@ -145,9 +149,37 @@ fn closed_stdin_takes_the_default_content_language() {
         closed: true,
         ..Fake::default()
     };
-    let plan = run_setup(&mut p, &env, Language::En, &ok).unwrap();
+    let plan = run_setup(&mut p, &env, Language::En, &ok, &no_routes).unwrap();
     assert_eq!(
         plan.updates,
         [("LIBERARR_CONTENT_LANGUAGE", "en".to_string())]
+    );
+}
+
+/// Money guard: an OpenRouter step gets its own provider list, picked from the providers that
+/// serve the chosen model, and the other step's list is left alone.
+#[test]
+fn openrouter_routing_is_asked_per_step_from_the_model_providers() {
+    let env = parse_env(
+        &ENV.replace(
+            "LIBERARR_TRANSCRIBE_PROVIDER=mistral",
+            "LIBERARR_TRANSCRIBE_PROVIDER=openrouter",
+        )
+        .replace(
+            "LIBERARR_TRANSCRIBE_MODEL=voxtral-mini-transcribe-3",
+            "LIBERARR_TRANSCRIBE_MODEL=mistralai/voxtral-mini-transcribe-3-0",
+        ),
+    );
+    let routes = |_: &str, key: &str, model: &str| {
+        assert_eq!(key, "stored-transcribe-key");
+        assert_eq!(model, "mistralai/voxtral-mini-transcribe-3-0");
+        Ok(vec!["mistral".to_string()])
+    };
+    let mut p = Fake::default();
+    p.choices.push_back(Picked::Option(0));
+    let plan = run_setup(&mut p, &env, Language::En, &ok, &routes).unwrap();
+    assert_eq!(
+        plan.updates,
+        [("LIBERARR_TRANSCRIBE_ROUTING_ONLY", "mistral".to_string())]
     );
 }

@@ -65,6 +65,36 @@ pub async fn list_models(provider: Provider, base_url: &str, api_key: &str) -> R
         .unwrap_or_default())
 }
 
+/// The providers that serve an OpenRouter model, as routing slugs (`azure`, `mistral`), sorted.
+/// `GET {base}/models/{model}/endpoints`.
+pub async fn openrouter_providers(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+) -> Result<Vec<String>> {
+    let base = base_url.trim_end_matches('/');
+    let reply = http::get(
+        &http::client(),
+        &format!("{base}/models/{model}/endpoints"),
+        Auth::Bearer(api_key),
+        TIMEOUT,
+        |b| b,
+    )
+    .await?;
+    // A tag is `slug` or `slug/variant` (`azure/eu`): the slug covers every variant.
+    let mut slugs: Vec<String> = reply
+        .pointer("/data/endpoints")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.get("tag")?.as_str()?.split('/').next().map(String::from))
+        .filter(|s| !s.is_empty())
+        .collect();
+    slugs.sort();
+    slugs.dedup();
+    Ok(slugs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -30,7 +30,7 @@ const fn entry(
     }
 }
 
-use Provider::{Anthropic, Claude, Mistral, OpenAi};
+use Provider::{Anthropic, Claude, Mistral, OpenAi, OpenRouter};
 use Step::{Summarize, Transcribe};
 
 // No OpenAI chat model: none is named anywhere in the code, and they change too fast to guess.
@@ -81,6 +81,15 @@ pub const MODELS: &[Entry] = &[
         "claude-haiku-5-5",
         "model.claude_haiku_5_5",
         false,
+        None,
+    ),
+    // Through OpenRouter, billed on your own Mistral key when routed to `mistral` (BYOK).
+    entry(
+        OpenRouter,
+        Transcribe,
+        "mistralai/voxtral-mini-transcribe-3-0",
+        "model.voxtral_mini_transcribe_3",
+        true,
         None,
     ),
     entry(Claude, Summarize, "sonnet", "model.cli_sonnet", true, None),

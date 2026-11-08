@@ -1,7 +1,7 @@
 //! The connection test behind `init`: the model list of an API provider, or the login of the
 //! `claude` CLI.
 use liberarr_core::ai::Provider;
-use liberarr_infra::model_list::list_models;
+use liberarr_infra::model_list::{list_models, openrouter_providers};
 use rust_i18n::t;
 
 /// True when `claude auth status` exits 0 within a few seconds. Output is discarded: no token is read.
@@ -42,5 +42,16 @@ pub fn connect(
         };
     }
     rt.block_on(list_models(provider, url, key))
+        .map_err(|e| e.to_string())
+}
+
+/// The [`super::Routes`] of the real command: blocks on `rt`.
+pub fn routes(
+    rt: &tokio::runtime::Runtime,
+    url: &str,
+    key: &str,
+    model: &str,
+) -> Result<Vec<String>, String> {
+    rt.block_on(openrouter_providers(url, key, model))
         .map_err(|e| e.to_string())
 }

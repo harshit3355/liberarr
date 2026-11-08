@@ -63,7 +63,13 @@ pub struct Capability {
 
 pub fn capability(p: Provider, model: &str) -> Capability {
     let transcription = match (p, model) {
-        (Provider::Anthropic | Provider::OpenRouter | Provider::Claude, _) => None,
+        (Provider::Anthropic | Provider::Claude, _) => None,
+        // OpenRouter ids are `vendor/model`: the vendor's own rules apply.
+        (Provider::OpenRouter, m) => match m.split_once('/') {
+            Some(("openai", m)) => capability(Provider::OpenAi, m).transcription,
+            Some(("mistralai", m)) => capability(Provider::Mistral, m).transcription,
+            _ => Some(Timestamps::Unknown),
+        },
         (Provider::OpenAi, "whisper-1") => Some(Timestamps::Segments),
         (
             Provider::OpenAi,
@@ -98,6 +104,19 @@ mod tests {
         );
         assert_eq!(
             capability(Provider::OpenAi, "gpt-4o-transcribe").transcription,
+            Some(Timestamps::TextOnly)
+        );
+        // Through OpenRouter, the vendor prefix picks the same rule.
+        assert_eq!(
+            capability(
+                Provider::OpenRouter,
+                "mistralai/voxtral-mini-transcribe-3-0"
+            )
+            .transcription,
+            Some(Timestamps::Segments)
+        );
+        assert_eq!(
+            capability(Provider::OpenRouter, "openai/gpt-transcribe").transcription,
             Some(Timestamps::TextOnly)
         );
     }

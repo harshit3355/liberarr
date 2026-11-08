@@ -17,7 +17,11 @@ pub fn defaults(p: Provider, step: Step) -> (Option<&'static str>, Option<&'stat
             Some("voxtral-mini-transcribe-3"),
         ),
         (Provider::Mistral, Step::Summarize) => (Some("https://api.mistral.ai/v1"), None),
-        (Provider::OpenRouter, _) => (Some(OPENROUTER_URL), None),
+        (Provider::OpenRouter, Step::Transcribe) => (
+            Some(OPENROUTER_URL),
+            Some("mistralai/voxtral-mini-transcribe-3-0"),
+        ),
+        (Provider::OpenRouter, Step::Summarize) => (Some(OPENROUTER_URL), None),
         (Provider::Claude, Step::Summarize) => (None, Some("sonnet")),
         (Provider::Anthropic | Provider::Claude, _) => (Some("https://api.anthropic.com"), None),
     }
