@@ -104,11 +104,18 @@ fn granule(page: &[u8]) -> i64 {
     i64::from_le_bytes(page[6..14].try_into().unwrap_or_default())
 }
 
-/// `OpusHead` + `OpusTags` pages, then `pages` renumbered from 2 with the last one marked end of stream.
-fn build_part(headers: &[&[u8]], pages: &[&[u8]]) -> Vec<u8> {
+/// `OpusHead` + `OpusTags` pages, then `pages` renumbered from 2 with the last one marked end of
+/// stream, their granule positions moved back by `shift` so the part plays from 0 like a file of its
+/// own: a provider then times its segments from the part start, whatever it reads.
+fn build_part(headers: &[&[u8]], pages: &[&[u8]], shift: i64) -> Vec<u8> {
     let mut out = headers.concat();
     for (i, p) in pages.iter().enumerate() {
         let mut p = p.to_vec();
+        let g = granule(&p);
+        // -1 means no packet ends on this page: keep it.
+        if g >= 0 {
+            p[6..14].copy_from_slice(&(g - shift).to_le_bytes());
+        }
         p[18..22].copy_from_slice(&(2 + i as u32).to_le_bytes());
         if i + 1 == pages.len() {
             p[5] |= 0x04;
@@ -159,7 +166,7 @@ pub fn split_ogg(data: &[u8], max_bytes: usize) -> Result<Vec<(Vec<u8>, f64)>> {
     let header_len = head.len() + tags.len();
 
     let (mut parts, mut cur, mut cur_len) = (Vec::new(), Vec::<&[u8]>::new(), header_len);
-    let (mut start, mut prev) = (0.0, Some(pre_skip));
+    let (mut start, mut shift, mut prev) = (0.0, 0, Some(pre_skip));
     for p in rest {
         if header_len + p.len() > max_bytes {
             return Err(bad("a page exceeds the maximum size"));
@@ -169,14 +176,16 @@ pub fn split_ogg(data: &[u8], max_bytes: usize) -> Result<Vec<(Vec<u8>, f64)>> {
             let (true, Some(g)) = (p[5] & 1 == 0, prev) else {
                 return Err(bad("no valid cut point"));
             };
-            parts.push((build_part(&headers, &cur), start));
-            (cur, cur_len, start) = (Vec::new(), header_len, seconds(g));
+            parts.push((build_part(&headers, &cur, shift), start));
+            // The part keeps the same OpusHead, so its decoder drops `pre_skip` samples at the start
+            // (about 6 ms at each cut): negligible for transcript timestamps.
+            (cur, cur_len, start, shift) = (Vec::new(), header_len, seconds(g), g - pre_skip);
         }
         cur.push(p);
         cur_len += p.len();
         prev = Some(granule(p)).filter(|g| *g >= 0);
     }
-    parts.push((build_part(&headers, &cur), start));
+    parts.push((build_part(&headers, &cur, shift), start));
     Ok(parts)
 }
 
@@ -291,6 +300,11 @@ pub(crate) mod tests {
             .flat_map(|(b, _)| b[headers..].chunks(128).map(|p| p[28]))
             .collect();
         assert_eq!(bodies, [1, 2, 3, 4, 5, 6]);
+        // Each part plays from 0: its pages keep 1 s and 2 s after pre_skip, not the absolute time.
+        for (bytes, _) in &parts {
+            let granules: Vec<i64> = bytes[headers..].chunks(128).map(granule).collect();
+            assert_eq!(granules, [PRE_SKIP + 48_000, PRE_SKIP + 2 * 48_000]);
+        }
         // Small enough input is returned whole.
         assert_eq!(split_ogg(&data, data.len()).unwrap(), [(data, 0.0)]);
     }
