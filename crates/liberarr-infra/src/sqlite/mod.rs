@@ -6,7 +6,8 @@ mod schema;
 use liberarr_core::{Error, Result};
 use rusqlite::types::Type;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
-use std::fs::{File, OpenOptions};
+use std::fs::{File, OpenOptions, Permissions};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -40,6 +41,7 @@ pub struct Db {
 impl Db {
     /// Opens (creating if needed) the database: WAL, foreign keys, 5 s busy timeout, migrations.
     pub fn open(path: &Path) -> Result<Db> {
+        owner_only(path)?;
         let mut conn = Connection::open(path).map_err(storage)?;
         // Before any other statement, so concurrent openers wait instead of failing.
         conn.busy_timeout(Duration::from_millis(5000))
@@ -55,6 +57,7 @@ impl Db {
             .create(true)
             .write(true)
             .truncate(false)
+            .mode(0o600)
             .open(lock_path)
             .map_err(storage)?;
         Ok(Db {
@@ -87,6 +90,27 @@ impl Db {
         c.pragma_query_value(None, "user_version", |r| r.get(0))
             .map_err(storage)
     }
+}
+
+/// The DB holds every transcript: 0600 whatever the umask or the home's mode. SQLite gives
+/// `-wal`/`-shm` the main file's mode; existing ones (crash leftovers, older installs) are tightened.
+fn owner_only(path: &Path) -> Result<()> {
+    OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(path)
+        .map_err(storage)?;
+    for suffix in ["", "-wal", "-shm"] {
+        let mut p = path.as_os_str().to_owned();
+        p.push(suffix);
+        match std::fs::set_permissions(&p, Permissions::from_mode(0o600)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(storage(e)),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Write transactions take the lock up front (`BEGIN IMMEDIATE`) so they never fail on upgrade.
@@ -314,6 +338,38 @@ mod tests {
         let jobs = db.list_for(rec).await.unwrap();
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].status, JobStatus::Queued);
+    }
+
+    /// Issue #88: transcripts must not be readable by other local users.
+    #[tokio::test]
+    async fn db_files_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let side = |p: &Path, s: &str| {
+            let mut o = p.as_os_str().to_owned();
+            o.push(s);
+            PathBuf::from(o)
+        };
+        let t = TempDb::new("perms");
+        let path = t.path();
+
+        let db = Db::open(&path).unwrap();
+        db.add(new_rec("h1")).await.unwrap();
+        for s in ["", "-wal", "-shm"] {
+            assert_eq!(mode(&side(&path, s)), 0o600, "fresh {s}");
+        }
+
+        // Files created world-readable by an older version (`db` keeps the WAL alive, as a
+        // crash would) are tightened on the next open.
+        for s in ["", "-wal", "-shm"] {
+            std::fs::set_permissions(side(&path, s), std::fs::Permissions::from_mode(0o644))
+                .unwrap();
+        }
+        let db2 = Db::open(&path).unwrap();
+        db2.add(new_rec("h2")).await.unwrap();
+        for s in ["", "-wal", "-shm"] {
+            assert_eq!(mode(&side(&path, s)), 0o600, "existing {s}");
+        }
     }
 
     #[tokio::test]
