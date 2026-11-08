@@ -124,7 +124,8 @@ where
         let known = self.ledger.known(&hash).await?;
 
         for (session, size) in after {
-            if known.contains(&session) {
+            // An empty session has no audio and would fail as "not a PLAUD.AI file" on every pull.
+            if size == 0 || known.contains(&session) {
                 continue;
             }
             // A session that is new or grew since the first listing is still being recorded.
@@ -304,6 +305,21 @@ mod tests {
         let r = rig.pull();
         assert_eq!(r, PullReport::default());
         assert!(rig.dev.0.downloads.borrow().is_empty());
+    }
+
+    #[test]
+    fn pull_skips_empty_session_and_pulls_the_rest() {
+        let (_, file) = ogg_and_device_file();
+        let rig = Rig::new(FakeDevice::with_file(file));
+        rig.dev
+            .0
+            .files
+            .borrow_mut()
+            .insert(0, (SESSION - 1, Vec::new()));
+        let r = rig.pull();
+        assert_eq!(r.pulled, vec![1]);
+        assert!(r.failed.is_empty());
+        assert_eq!(*rig.dev.0.downloads.borrow(), vec![(SESSION, 0)]);
     }
 
     #[test]

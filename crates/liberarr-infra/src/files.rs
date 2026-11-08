@@ -139,7 +139,11 @@ impl PartialStore for FsPartialStore {
     }
 
     fn take(&self, key: &str) -> Result<Vec<u8>> {
-        fs::read(self.part(key)).map_err(|e| io_err("read part", e))
+        match fs::read(self.part(key)) {
+            Ok(data) => Ok(data),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(e) => Err(io_err("read part", e)),
+        }
     }
 
     /// Also drops an unconsumed staged Ogg (an `Ingest` dedup hit leaves it behind).
@@ -261,6 +265,10 @@ mod tests {
             audio: d.0.join("audio"),
         };
         assert_eq!(s.len("h-1").unwrap(), 0);
+        assert!(
+            s.take("h-1").unwrap().is_empty(),
+            "a missing part reads as empty"
+        );
         s.append("h-1", b"abc").unwrap();
         s.append("h-1", b"de").unwrap();
         assert_eq!(s.len("h-1").unwrap(), 5);

@@ -63,7 +63,7 @@ pub trait PartialStore {
     /// Bytes of the `.part` file so far (0 when absent).
     fn len(&self, key: &str) -> Result<u64>;
     fn append(&self, key: &str, data: &[u8]) -> Result<()>;
-    /// Reads the whole `.part`; it stays on disk until `discard`, so a crash loses nothing.
+    /// Reads the whole `.part` (empty when absent); it stays on disk until `discard`, so a crash loses nothing.
     fn take(&self, key: &str) -> Result<Vec<u8>>;
     fn discard(&self, key: &str) -> Result<()>;
     /// Keeps the encrypted file that failed verification, for the owner to inspect.
