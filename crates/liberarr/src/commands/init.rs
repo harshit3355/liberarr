@@ -63,13 +63,14 @@ pub fn apply(
     let current = parse_env(&existing);
     let ui = i18n::language(current.get("LIBERARR_LANG").map(String::as_str));
     let plan = match prompter {
-        None => setup::from_env(&current, ui, |k| std::env::var(k).ok())?,
+        None => setup::from_env(&current, ui, &home, |k| std::env::var(k).ok())?,
         Some(p) => {
             let rt = tokio::runtime::Runtime::new()?;
             setup::run_setup(
                 p,
                 &current,
                 ui,
+                &home,
                 &|p, url, key| setup::connect(&rt, p, url, key),
                 &|url, key, model| setup::routes(&rt, url, key, model),
             )?

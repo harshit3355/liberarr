@@ -16,6 +16,7 @@ LIBERARR_LLM_BASE_URL=https://api.anthropic.com
 LIBERARR_LLM_API_KEY=stored-llm-key
 LIBERARR_LLM_MODEL=claude-sonnet-5-5
 LIBERARR_CONTENT_LANGUAGE=fr
+LIBERARR_OBSIDIAN_DIR=/tmp
 ";
 const SECRETS: [&str; 3] = [
     "LIBERARR_SECRET_KEY",
@@ -90,7 +91,7 @@ fn set_values_are_never_overwritten_or_re_asked() {
     let env = parse_env(&partial);
     let mut p = Fake::default();
     p.choices.push_back(Picked::Text("my-model".into()));
-    let plan = run_setup(&mut p, &env, Language::En, &ok, &no_routes).unwrap();
+    let plan = run_setup(&mut p, &env, Language::En, Path::new("/h"), &ok, &no_routes).unwrap();
     assert_eq!(
         plan.updates,
         [("LIBERARR_LLM_MODEL", "my-model".to_string())]
@@ -114,7 +115,7 @@ fn reconfigure_keeps_the_secrets_and_never_shows_a_secret() {
     ]);
     p.confirms.push_back(false);
     p.secrets.push_back(TYPED_KEY);
-    let plan = run_setup(&mut p, &env, Language::En, &ok, &no_routes).unwrap();
+    let plan = run_setup(&mut p, &env, Language::En, Path::new("/h"), &ok, &no_routes).unwrap();
 
     let out = written(&plan);
     for k in SECRETS {
@@ -149,7 +150,7 @@ fn closed_stdin_takes_the_default_content_language() {
         closed: true,
         ..Fake::default()
     };
-    let plan = run_setup(&mut p, &env, Language::En, &ok, &no_routes).unwrap();
+    let plan = run_setup(&mut p, &env, Language::En, Path::new("/h"), &ok, &no_routes).unwrap();
     assert_eq!(
         plan.updates,
         [("LIBERARR_CONTENT_LANGUAGE", "en".to_string())]
@@ -177,9 +178,30 @@ fn openrouter_routing_is_asked_per_step_from_the_model_providers() {
     };
     let mut p = Fake::default();
     p.choices.push_back(Picked::Option(0));
-    let plan = run_setup(&mut p, &env, Language::En, &ok, &routes).unwrap();
+    let plan = run_setup(&mut p, &env, Language::En, Path::new("/h"), &ok, &routes).unwrap();
     assert_eq!(
         plan.updates,
         [("LIBERARR_TRANSCRIBE_ROUTING_ONLY", "mistral".to_string())]
     );
+}
+
+/// The non-interactive mode writes the notes folder it was given, created, and refuses a path
+/// that would follow the working directory.
+#[test]
+fn non_interactive_writes_a_usable_notes_folder() {
+    let env = parse_env(&ENV.replace("LIBERARR_OBSIDIAN_DIR=/tmp\n", ""));
+    let dir = std::env::temp_dir().join(format!("liberarr-notes-{}", std::process::id()));
+    let given = dir.display().to_string();
+    let plan = from_env(&env, Language::En, Path::new("/h"), |k| {
+        (k == "LIBERARR_OBSIDIAN_DIR").then(|| given.clone())
+    })
+    .unwrap();
+    assert_eq!(plan.updates, [("LIBERARR_OBSIDIAN_DIR", given.clone())]);
+    assert!(dir.is_dir());
+    std::fs::remove_dir(&dir).unwrap();
+
+    let relative = from_env(&env, Language::En, Path::new("/h"), |k| {
+        (k == "LIBERARR_OBSIDIAN_DIR").then(|| "notes".to_string())
+    });
+    assert!(relative.is_err());
 }

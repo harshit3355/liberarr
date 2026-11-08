@@ -18,6 +18,7 @@ use liberarr_core::ai::{Provider, Step, capability, supports};
 use liberarr_core::lang::Language;
 use rust_i18n::t;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 pub type SetupResult<T> = Result<T, Box<dyn std::error::Error>>;
 /// `(variable, value)` lines to write in the `.env`.
@@ -250,12 +251,13 @@ pub fn run_setup(
     p: &mut dyn Prompter,
     env: &HashMap<String, String>,
     ui: Language,
+    home: &Path,
     check: &Checker,
     routes: &Routes,
 ) -> SetupResult<Plan> {
     let mut plan = secrets(env)?;
     plan.updates
-        .extend(configure(p, env, Mode::Fill, ui, check, routes)?);
+        .extend(configure(p, env, Mode::Fill, ui, home, check, routes)?);
     if plan.updates.is_empty() && p.is_interactive() {
         let options = [
             Choice {
@@ -268,7 +270,7 @@ pub fn run_setup(
             },
         ];
         if let Picked::Option(1) = p.choose(&t!("setup.existing"), &options, Some(0))? {
-            plan.updates = configure(p, env, Mode::Reconfigure, ui, check, routes)?;
+            plan.updates = configure(p, env, Mode::Reconfigure, ui, home, check, routes)?;
         }
     }
     Ok(plan)
@@ -286,6 +288,7 @@ fn configure(
     env: &HashMap<String, String>,
     mode: Mode,
     ui: Language,
+    home: &Path,
     check: &Checker,
     routes: &Routes,
 ) -> SetupResult<Updates> {
@@ -402,10 +405,55 @@ fn configure(
             chosen.as_str().to_string(),
         );
     }
+    if reconf || current(env, NOTES_DIR).is_none() {
+        let default = current(env, NOTES_DIR)
+            .unwrap_or_else(|| crate::config::default_notes_dir(home).display().to_string());
+        let dir = ask_notes_dir(p, &default)?;
+        set(&mut updates, env, NOTES_DIR, dir);
+    }
     Ok(updates)
 }
 
 pub(crate) const CONTENT_LANGUAGE: &str = "LIBERARR_CONTENT_LANGUAGE";
+pub(crate) const NOTES_DIR: &str = "LIBERARR_OBSIDIAN_DIR";
+
+/// The notes folder as written in the `.env`: `~/` expanded, absolute (a relative path would
+/// follow the working directory), created when missing. The error is the message to show.
+pub(crate) fn notes_dir(v: &str) -> Result<String, String> {
+    let v = v.trim();
+    let path = match (v.strip_prefix("~/"), std::env::var_os("HOME")) {
+        (Some(rest), Some(h)) => PathBuf::from(h).join(rest),
+        _ => PathBuf::from(v),
+    };
+    if !path.is_absolute() || v.chars().any(char::is_control) {
+        return Err(t!("setup.notes_dir_absolute").into_owned());
+    }
+    std::fs::create_dir_all(&path).map_err(|e| {
+        t!(
+            "setup.notes_dir_unusable",
+            path = path.display(),
+            kind = e.kind()
+        )
+        .into_owned()
+    })?;
+    Ok(path.display().to_string())
+}
+
+/// Asks for the notes folder until it is usable, at most [`KEY_TRIES`] times.
+fn ask_notes_dir(p: &mut dyn Prompter, default: &str) -> SetupResult<String> {
+    for _ in 0..KEY_TRIES {
+        let v = match p.text(&t!("setup.notes_dir"), Some(default)) {
+            // Closed stdin (a provisioning script): no one can answer, take the default.
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => default.to_string(),
+            r => r?,
+        };
+        match notes_dir(&v) {
+            Ok(dir) => return Ok(dir),
+            Err(why) => p.warn(&why),
+        }
+    }
+    Err(t!("setup.aborted").into_owned().into())
+}
 
 /// Language of the summaries and the note headings; defaults to the current value, else the UI's.
 fn ask_content_language(

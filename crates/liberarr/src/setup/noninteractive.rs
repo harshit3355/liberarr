@@ -1,9 +1,10 @@
 //! `liberarr init --non-interactive`: the provider settings come from the process environment
-//! (`LIBERARR_{TRANSCRIBE,LLM}_{PROVIDER,BASE_URL,API_KEY,MODEL}`), never from the command line.
+//! (`LIBERARR_{TRANSCRIBE,LLM}_{PROVIDER,BASE_URL,API_KEY,MODEL}`, optional
+//! `LIBERARR_CONTENT_LANGUAGE` and `LIBERARR_OBSIDIAN_DIR`), never from the command line.
 //! Same rules as the questions: a value already set in the `.env` wins and is never overwritten.
 use super::{
-    CONTENT_LANGUAGE, Plan, STEPS, SetupResult, current, current_provider, routing_var, secrets,
-    valid_url,
+    CONTENT_LANGUAGE, NOTES_DIR, Plan, STEPS, SetupResult, current, current_provider, notes_dir,
+    routing_var, secrets, valid_url,
 };
 use crate::config::{is_unset, parse_routing};
 use crate::providers;
@@ -11,10 +12,12 @@ use liberarr_core::ai::{Provider, capability, supports};
 use liberarr_core::lang::Language;
 use rust_i18n::t;
 use std::collections::HashMap;
+use std::path::Path;
 
 pub fn from_env(
     existing: &HashMap<String, String>,
     ui: Language,
+    home: &Path,
     var: impl Fn(&str) -> Option<String>,
 ) -> SetupResult<Plan> {
     let mut plan = secrets(existing)?;
@@ -90,6 +93,12 @@ pub fn from_env(
         };
         plan.updates
             .push((CONTENT_LANGUAGE, lang.as_str().to_string()));
+    }
+    if current(existing, NOTES_DIR).is_none() {
+        let v = from_env(NOTES_DIR)?
+            .unwrap_or_else(|| crate::config::default_notes_dir(home).display().to_string());
+        let dir = notes_dir(&v).map_err(|why| format!("{NOTES_DIR}: {why}"))?;
+        plan.updates.push((NOTES_DIR, dir));
     }
     Ok(plan)
 }

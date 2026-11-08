@@ -82,6 +82,11 @@ pub fn parse_routing(v: &str) -> Option<Vec<String>> {
         .then_some(list)
 }
 
+/// Where the notes go when `LIBERARR_OBSIDIAN_DIR` is not set.
+pub fn default_notes_dir(home: &Path) -> PathBuf {
+    home.join("obsidian")
+}
+
 pub fn is_unset(v: &str) -> bool {
     let v = v.trim();
     v.is_empty() || v == PLACEHOLDER
@@ -170,7 +175,7 @@ fn load_from(
         llm: profile("LLM", Step::Summarize)?,
         obsidian: get("LIBERARR_OBSIDIAN_DIR")
             .filter(|v| !is_unset(v))
-            .map_or_else(|| home.join("obsidian"), PathBuf::from),
+            .map_or_else(|| default_notes_dir(home), PathBuf::from),
         content_language,
         content_language_set,
         cookie_secure: get("LIBERARR_COOKIE_SECURE").is_some_and(|v| v.trim() == "true"),

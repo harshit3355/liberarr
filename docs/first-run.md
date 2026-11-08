@@ -13,15 +13,16 @@ Creates `~/.liberarr` (or `LIBERARR_HOME`) and its `.env` file (mode 0600). It:
 - generates the secrets (`LIBERARR_SECRET_KEY`, `LIBERARR_API_KEY`) and the web UI admin password;
 - asks for the transcription provider, then the summary provider: URL, API key (hidden input), model. Each key is tested and the account's models are proposed. See [AI providers](ai-providers.md) to choose;
 - asks for the language of summaries and notes (`en` or `fr`).
+- asks for the folder of the notes (`LIBERARR_OBSIDIAN_DIR`), for example inside an Obsidian vault. Default `~/.liberarr/obsidian`. The folder is created when missing; an unusable folder is refused with the reason.
 
 At the end it prints the web UI password **once** (user `admin`). It stays in `.env` as `LIBERARR_ADMIN_PASSWORD`.
 
-Running `init` again is safe: values already set are kept. When everything is set, it offers to keep the configuration or to reconfigure the providers.
+Running `init` again is safe: values already set are kept. When everything is set, it offers to keep the configuration or to reconfigure the providers, the language and the notes folder, with the current values as defaults. In `tui`, `s` (settings) does the same.
 
 Options:
 
 - `--ui tui`: the same questions, full-screen. `LIBERARR_UI=tui` in the shell does the same.
-- `--non-interactive`: asks nothing. Export `LIBERARR_TRANSCRIBE_PROVIDER`, `_BASE_URL`, `_API_KEY`, `_MODEL` and the same four `LIBERARR_LLM_*` variables in the shell first (keys never go on the command line). The base URL and the transcription model can be left out when the provider has a default. Fails, naming the variable, when one is missing.
+- `--non-interactive`: asks nothing. Export `LIBERARR_TRANSCRIBE_PROVIDER`, `_BASE_URL`, `_API_KEY`, `_MODEL` and the same four `LIBERARR_LLM_*` variables in the shell first (keys never go on the command line). The base URL and the transcription model can be left out when the provider has a default. `LIBERARR_CONTENT_LANGUAGE` and `LIBERARR_OBSIDIAN_DIR` are optional. Fails, naming the variable, when one is missing.
 
 ## 2. `liberarr link`: unlock your device (once)
 

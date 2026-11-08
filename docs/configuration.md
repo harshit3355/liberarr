@@ -37,13 +37,13 @@ Lines are `NAME=value`; `#` starts a comment.
 | `LIBERARR_LLM_BASE_URL`, `LIBERARR_LLM_API_KEY`, `LIBERARR_LLM_MODEL` | Same, for the summary. Not used with `claude`. |
 | `LIBERARR_TRANSCRIBE_ROUTING_ONLY`, `LIBERARR_LLM_ROUTING_ONLY` | OpenRouter only: providers allowed for that step. See [AI providers](ai-providers.md#openrouter). |
 | `LIBERARR_CONTENT_LANGUAGE` | Language of summaries and note headings: `en` or `fr`. Without it, it follows the interface language and Liberarr prints a reminder. |
+| `LIBERARR_OBSIDIAN_DIR` | Folder for the exported notes, for example inside an Obsidian vault. An absolute path (`~/` is expanded); `init` creates it when missing. Default `<LIBERARR_HOME>/obsidian`. |
 
 ### Optional, add them by hand
 
 | Variable | Meaning |
 |---|---|
 | `LIBERARR_LANG` | Language of the command line (messages and `--help`): `en` or `fr`. Default: the OS locale (`LC_ALL`, `LC_MESSAGES`, `LANG`), else English. |
-| `LIBERARR_OBSIDIAN_DIR` | Folder for the exported notes, for example inside an Obsidian vault. Default `<LIBERARR_HOME>/obsidian`. |
 | `LIBERARR_COOKIE_SECURE` | `true` to set the `Secure` flag on the login cookie, when the web UI is served over HTTPS. |
 
 The note export is one-way. In an existing note, Liberarr writes only between `%% liberarr:start %%` and `%% liberarr:end %%`: your own text outside these markers is kept.
