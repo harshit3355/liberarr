@@ -20,6 +20,8 @@ pub struct OpenAiCompat {
     ask_segments: bool,
     /// The `provider` object of every request (OpenRouter routing), when set.
     routing: Option<Value>,
+    /// `keywords` of every transcription request (`gpt-transcribe`), when set.
+    keywords: Vec<String>,
     http: reqwest::Client,
 }
 
@@ -31,6 +33,7 @@ impl OpenAiCompat {
             model,
             ask_segments,
             routing: None,
+            keywords: Vec::new(),
             http: http::client(),
         }
     }
@@ -40,6 +43,12 @@ impl OpenAiCompat {
     pub fn with_routing(mut self, only: &[String]) -> Self {
         self.routing =
             Some(json!({"only": only, "allow_fallbacks": false, "require_parameters": true}));
+        self
+    }
+
+    /// Words or phrases sent as repeated `keywords[]` parts (the spec's multipart array form).
+    pub fn with_keywords(mut self, keywords: Vec<String>) -> Self {
+        self.keywords = keywords;
         self
     }
 
@@ -116,10 +125,13 @@ impl Transcriber for OpenAiCompat {
                     Part::bytes(audio.to_vec()).file_name(filename.to_string()),
                 );
             // Multipart takes the routing object as a JSON-encoded field.
-            match &self.routing {
+            let form = match &self.routing {
                 Some(routing) => form.text("provider", routing.to_string()),
                 None => form,
-            }
+            };
+            self.keywords
+                .iter()
+                .fold(form, |f, k| f.text("keywords[]", k.clone()))
         };
         let r = self
             .send("audio/transcriptions", TRANSCRIBE_TIMEOUT, false, |b| {
@@ -260,6 +272,18 @@ mod tests {
                 }),
             )
             .route(
+                "/keywords/audio/transcriptions",
+                // Replies with the `keywords[]` parts it received, as a JSON array in the text.
+                post(|body: String| async move {
+                    let seen: Vec<&str> = body
+                        .split("name=\"keywords[]\"\r\n\r\n")
+                        .skip(1)
+                        .filter_map(|rest| Some(rest.split_once("\r\n")?.0))
+                        .collect();
+                    json!({ "text": json!(seen).to_string() }).to_string()
+                }),
+            )
+            .route(
                 "/denied/audio/transcriptions",
                 post(|| async { (StatusCode::UNAUTHORIZED, r#"{"error":{"message":"Incorrect API key provided: sk-...abcd."}}"#) }),
             );
@@ -332,6 +356,25 @@ mod tests {
             assert_eq!(seen["allow_fallbacks"], json!(false));
             assert_eq!(seen["require_parameters"], json!(true));
         }
+    }
+
+    /// Vocabulary goes out as the spec's repeated `keywords[]` parts, and only when set.
+    #[tokio::test]
+    async fn keywords_are_sent_only_when_set() {
+        let base = serve().await;
+        let client = || {
+            OpenAiCompat::new(
+                format!("{base}/keywords"),
+                KEY.into(),
+                "gpt-transcribe".into(),
+                false,
+            )
+        };
+        let text = client().transcribe(b"a", "c.ogg").await.unwrap().text;
+        assert_eq!(text, "[]");
+        let with = client().with_keywords(vec!["Liberarr".into(), "Plaud Note".into()]);
+        let text = with.transcribe(b"a", "c.ogg").await.unwrap().text;
+        assert_eq!(text, r#"["Liberarr","Plaud Note"]"#);
     }
 
     #[tokio::test]

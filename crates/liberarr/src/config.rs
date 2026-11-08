@@ -28,6 +28,8 @@ pub struct Config {
     pub admin_password: String,
     pub transcribe: Profile,
     pub llm: Profile,
+    /// `LIBERARR_TRANSCRIBE_VOCABULARY`: names and terms to bias the transcription toward.
+    pub vocabulary: Vec<String>,
     pub obsidian: PathBuf,
     /// Language of the summary and of the note headings.
     pub content_language: Language,
@@ -173,6 +175,15 @@ fn load_from(
         admin_password: need("LIBERARR_ADMIN_PASSWORD")?,
         transcribe: profile("TRANSCRIBE", Step::Transcribe)?,
         llm: profile("LLM", Step::Summarize)?,
+        vocabulary: get("LIBERARR_TRANSCRIBE_VOCABULARY")
+            .map(|v| {
+                v.split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default(),
         obsidian: get("LIBERARR_OBSIDIAN_DIR")
             .filter(|v| !is_unset(v))
             .map_or_else(|| default_notes_dir(home), PathBuf::from),

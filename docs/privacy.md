@@ -5,7 +5,7 @@ Liberarr keeps everything in `LIBERARR_HOME` on your machine. Its database and w
 | What | Where to | When |
 |---|---|---|
 | Your Plaud token, and your devices' serial numbers (already known to Plaud) to get their signatures; the device keys come back | Plaud's API (`api.plaud.ai` or your region's Plaud API host) | `link` only. |
-| The audio of each recording | Your transcription provider | Transcription step. |
+| The audio of each recording, and your `LIBERARR_TRANSCRIBE_VOCABULARY` list when set | Your transcription provider | Transcription step. |
 | The transcript of each recording | Your summary provider | Summary step. |
 | Your API keys | The provider each key belongs to | Each request, and the key test in `init`. |
 

@@ -41,15 +41,33 @@ enum AnyLlm {
     Claude(ClaudeCli),
 }
 
-fn transcriber(p: &Profile) -> AnyTranscriber {
-    let (url, key, model) = (p.base_url.clone(), p.api_key.clone(), p.model.clone());
+/// Whether the provider documents a vocabulary field for this model: Mistral `context_bias`,
+/// OpenAI `keywords` (`gpt-transcribe` only).
+fn takes_vocabulary(p: &Profile) -> bool {
     match p.provider {
-        Provider::Mistral => AnyTranscriber::Mistral(MistralTranscriber::new(url, key, model)),
+        Provider::Mistral => true,
+        Provider::OpenAi => p.model == "gpt-transcribe",
+        _ => false,
+    }
+}
+
+fn transcriber(p: &Profile, vocabulary: &[String]) -> AnyTranscriber {
+    let (url, key, model) = (p.base_url.clone(), p.api_key.clone(), p.model.clone());
+    // Elsewhere it is ignored, with a warning at start (`warnings`).
+    let vocabulary = if takes_vocabulary(p) {
+        vocabulary.to_vec()
+    } else {
+        Vec::new()
+    };
+    match p.provider {
+        Provider::Mistral => AnyTranscriber::Mistral(
+            MistralTranscriber::new(url, key, model).with_context_bias(vocabulary),
+        ),
         provider => {
             // Models known to return text only reject `verbose_json`.
             let ask_segments =
                 capability(provider, &p.model).transcription != Some(Timestamps::TextOnly);
-            let t = OpenAiCompat::new(url, key, model, ask_segments);
+            let t = OpenAiCompat::new(url, key, model, ask_segments).with_keywords(vocabulary);
             AnyTranscriber::Compat(match provider {
                 Provider::OpenRouter if !p.routing_only.is_empty() => {
                     t.with_routing(&p.routing_only)
@@ -105,7 +123,7 @@ impl App {
             .map_err(|e| Error::Storage(format!("create home: {}", e.kind())))?;
         let db = Db::open(&cfg.home.join("liberarr.db"))?;
         Ok(App {
-            transcriber: transcriber(&cfg.transcribe),
+            transcriber: transcriber(&cfg.transcribe, &cfg.vocabulary),
             llm: llm(&cfg.llm),
             audio: FsAudioStore {
                 audio: audio_dir(&cfg),
@@ -130,9 +148,10 @@ impl App {
     }
 }
 
-/// Configuration warnings to show before work starts: an OpenRouter step without a provider list.
+/// Configuration warnings to show before work starts: an OpenRouter step without a provider list,
+/// a vocabulary the transcription provider cannot take.
 pub fn warnings(cfg: &Config) -> Vec<String> {
-    [
+    let mut w: Vec<String> = [
         (Step::Transcribe, &cfg.transcribe),
         (Step::Summarize, &cfg.llm),
     ]
@@ -142,7 +161,11 @@ pub fn warnings(cfg: &Config) -> Vec<String> {
         let var = crate::setup::routing_var(step);
         rust_i18n::t!("config.openrouter_unrestricted", var = var).into_owned()
     })
-    .collect()
+    .collect();
+    if !cfg.vocabulary.is_empty() && !takes_vocabulary(&cfg.transcribe) {
+        w.push(rust_i18n::t!("config.vocabulary_ignored").into_owned());
+    }
+    w
 }
 
 /// `<home>/audio`: shared by the partial store (staging) and the audio store (move vs copy rule).
@@ -228,5 +251,36 @@ impl Backend for App {
         }
         .run(id, index, done)
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A field the model does not document gets the whole transcription refused (OpenAI rejects
+    /// unknown fields): the vocabulary goes only where it is documented.
+    #[test]
+    fn vocabulary_only_where_documented() {
+        let p = |provider, model: &str| Profile {
+            provider,
+            base_url: String::new(),
+            api_key: String::new(),
+            model: model.into(),
+            routing_only: Vec::new(),
+        };
+        assert!(takes_vocabulary(&p(
+            Provider::Mistral,
+            "voxtral-mini-transcribe-3"
+        )));
+        assert!(takes_vocabulary(&p(Provider::OpenAi, "gpt-transcribe")));
+        for (provider, model) in [
+            (Provider::OpenAi, "whisper-1"),
+            (Provider::OpenAi, "gpt-4o-transcribe"),
+            (Provider::OpenRouter, "openai/gpt-transcribe"),
+            (Provider::Compatible, "gpt-transcribe"),
+        ] {
+            assert!(!takes_vocabulary(&p(provider, model)), "{model}");
+        }
     }
 }

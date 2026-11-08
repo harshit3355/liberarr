@@ -13,6 +13,7 @@ Error messages name the setting or the command to run; they never show a secret.
 | `the claude CLI is missing or not signed in` | Install Claude Code and sign in with `claude` first, or choose the `anthropic` provider with an API key. |
 | `Notes are written in …, the interface language` | Add `LIBERARR_CONTENT_LANGUAGE=en` (or `fr`) to `.env` so notes keep one language. |
 | `Warning: …_ROUTING_ONLY is empty` | OpenRouter may use its own shared models. Set the list, see [OpenRouter](ai-providers.md#openrouter). |
+| `Warning: LIBERARR_TRANSCRIBE_VOCABULARY is ignored` | Your transcription provider or model takes no vocabulary. Use `mistral`, or `openai` with `gpt-transcribe`, or remove the line. |
 | `No answer available (input closed)` | `init` has no terminal to ask in. Use `liberarr init --non-interactive` with the variables exported. |
 
 ## Device (`link`, `pull`)
