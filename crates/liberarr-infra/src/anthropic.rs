@@ -48,6 +48,7 @@ impl Llm for AnthropicLlm {
             &url,
             Auth::Header("x-api-key", &self.api_key),
             TIMEOUT,
+            true,
             |b| {
                 b.header("anthropic-version", API_VERSION)
                     .header("content-type", "application/json")

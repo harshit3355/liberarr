@@ -30,20 +30,24 @@ impl MistralTranscriber {
 impl Transcriber for MistralTranscriber {
     async fn transcribe(&self, audio: &[u8], filename: &str) -> Result<ChunkResult> {
         // No `language`: recordings mix French and English (and Mistral drops timestamps with it).
-        let form = Form::new()
-            .text("model", self.model.clone())
-            .text("timestamp_granularities", "segment")
-            .part(
-                "file",
-                Part::bytes(audio.to_vec()).file_name(filename.to_string()),
-            );
+        // Built per attempt: a multipart body cannot be cloned for a retry.
+        let form = || {
+            Form::new()
+                .text("model", self.model.clone())
+                .text("timestamp_granularities", "segment")
+                .part(
+                    "file",
+                    Part::bytes(audio.to_vec()).file_name(filename.to_string()),
+                )
+        };
         let url = format!("{}/audio/transcriptions", self.base_url);
         let r = http::send(
             &self.http,
             &url,
             Auth::Bearer(&self.api_key),
             TIMEOUT,
-            |b| b.multipart(form),
+            false,
+            |b| b.multipart(form()),
         )
         .await?;
         chunk_result(&r)

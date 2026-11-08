@@ -47,10 +47,12 @@ impl OpenAiCompat {
         &self,
         path: &str,
         timeout: Duration,
-        req: impl FnOnce(reqwest::RequestBuilder) -> reqwest::RequestBuilder,
+        retry_timeout: bool,
+        req: impl Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder,
     ) -> Result<Value> {
         let url = format!("{}/{path}", self.base_url);
-        http::send(&self.http, &url, Auth::Bearer(&self.api_key), timeout, req).await
+        let auth = Auth::Bearer(&self.api_key);
+        http::send(&self.http, &url, auth, timeout, retry_timeout, req).await
     }
 }
 
@@ -94,28 +96,32 @@ pub(crate) fn chunk_result(r: &Value) -> Result<ChunkResult> {
 
 impl Transcriber for OpenAiCompat {
     async fn transcribe(&self, audio: &[u8], filename: &str) -> Result<ChunkResult> {
-        // No `language`: recordings mix French and English.
-        let mut form = Form::new()
-            .text("model", self.model.clone())
-            .text(
-                "response_format",
-                if self.ask_segments {
-                    "verbose_json"
-                } else {
-                    "json"
-                },
-            )
-            .part(
-                "file",
-                Part::bytes(audio.to_vec()).file_name(filename.to_string()),
-            );
-        // Multipart takes the routing object as a JSON-encoded field.
-        if let Some(routing) = &self.routing {
-            form = form.text("provider", routing.to_string());
-        }
+        // Built per attempt: a multipart body cannot be cloned for a retry.
+        let form = || {
+            // No `language`: recordings mix French and English.
+            let form = Form::new()
+                .text("model", self.model.clone())
+                .text(
+                    "response_format",
+                    if self.ask_segments {
+                        "verbose_json"
+                    } else {
+                        "json"
+                    },
+                )
+                .part(
+                    "file",
+                    Part::bytes(audio.to_vec()).file_name(filename.to_string()),
+                );
+            // Multipart takes the routing object as a JSON-encoded field.
+            match &self.routing {
+                Some(routing) => form.text("provider", routing.to_string()),
+                None => form,
+            }
+        };
         let r = self
-            .send("audio/transcriptions", TRANSCRIBE_TIMEOUT, |b| {
-                b.multipart(form)
+            .send("audio/transcriptions", TRANSCRIBE_TIMEOUT, false, |b| {
+                b.multipart(form())
             })
             .await?;
         chunk_result(&r)
@@ -137,7 +143,7 @@ impl Llm for OpenAiCompat {
             body["provider"] = routing.clone();
         }
         let r = self
-            .send("chat/completions", CHAT_TIMEOUT, |b| {
+            .send("chat/completions", CHAT_TIMEOUT, true, |b| {
                 b.header("content-type", "application/json")
                     .body(body.to_string())
             })
