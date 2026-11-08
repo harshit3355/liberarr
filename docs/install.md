@@ -1,0 +1,39 @@
+# Install
+
+Liberarr is one binary. Nothing else is needed to run it.
+
+## Supported platforms
+
+| Target | System |
+|---|---|
+| `aarch64-apple-darwin` | macOS, Apple silicon |
+| `x86_64-apple-darwin` | macOS, Intel |
+| `x86_64-unknown-linux-gnu` | Linux, x86-64 |
+| `aarch64-unknown-linux-gnu` | Linux, ARM64 |
+
+Linux builds need glibc 2.35 or newer (Ubuntu 22.04, Debian 12) and use the host's BlueZ service for Bluetooth (present on desktop distributions); `libdbus` is linked dynamically. Windows is not supported.
+
+## Steps
+
+Download `liberarr-<target>.tar.gz` and its `.sha256` file from the [releases page](https://github.com/hocinehacherouf/liberarr/releases), then:
+
+```sh
+shasum -a 256 -c liberarr-<target>.tar.gz.sha256
+tar -xzf liberarr-<target>.tar.gz
+chmod +x liberarr
+xattr -d com.apple.quarantine liberarr 2>/dev/null || true   # macOS: the binary is not notarized
+mkdir -p ~/.local/bin && mv liberarr ~/.local/bin/           # then make sure ~/.local/bin is in your PATH
+liberarr --version
+```
+
+On macOS, the first `link` or `pull` asks for Bluetooth access for your terminal app: allow it.
+
+## Update
+
+Replace the binary with the new one, the same way. Your data in `~/.liberarr` is kept.
+
+## Uninstall
+
+Delete the binary. Your recordings, transcripts and settings stay in `~/.liberarr` (or `LIBERARR_HOME`) until you delete that folder.
+
+Next: [First run](first-run.md).

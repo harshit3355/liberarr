@@ -11,12 +11,13 @@ mod tui;
 // Catalogs are embedded at compile time: no locale file is read at runtime.
 rust_i18n::i18n!("locales", fallback = "en");
 
-use clap::{Parser, Subcommand};
+use clap::{Arg, ArgAction, Command, CommandFactory, FromArgMatches, Parser, Subcommand};
+use rust_i18n::t;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-/// Free your Plaud recordings: transcript, summary and visuals, with any AI provider.
+// The help text is not here: `command()` reads it from the catalogs (`help.<command>.<arg>`).
 #[derive(Parser)]
 #[command(version)]
 struct Cli {
@@ -26,53 +27,111 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Create the home folder and its .env (generated secrets, AI provider keys).
     Init {
-        /// Ask nothing: read LIBERARR_{TRANSCRIBE,LLM}_{PROVIDER,BASE_URL,API_KEY,MODEL} from the
-        /// environment (keys never go on the command line) and fail if one is missing.
         #[arg(long)]
         non_interactive: bool,
-        /// Question style: `plain` (default) or `tui` (full-screen). Default from LIBERARR_UI.
         #[arg(long, value_parser = ["plain", "tui"])]
         ui: Option<String>,
     },
-    /// Fetch the device keys from your Plaud account once, then test an unlock.
     Link {
-        /// Fetch a new key pair even if one is stored.
         #[arg(long)]
         force: bool,
     },
-    /// Pull new recordings from the device, then process them.
     Pull {
-        /// Only pull; do not transcribe or summarize.
         #[arg(long)]
         no_process: bool,
     },
-    /// Run the pipeline on local audio files.
     Process {
         #[arg(required = true)]
         files: Vec<PathBuf>,
     },
-    /// Queue a pipeline step of a recording again: the failed one, or `--step`. Runs in `serve`,
-    /// `tui` or the next `pull`/`process`; prior outputs are kept until the step succeeds.
     Rerun {
         id: i64,
         #[arg(long, value_parser = liberarr_core::jobs::STEPS)]
         step: Option<String>,
     },
-    /// Start the web UI and API, with the job worker.
     Serve {
-        /// Address to bind; 0.0.0.0 exposes the UI on the network.
         #[arg(long, default_value = "127.0.0.1")]
         host: IpAddr,
         #[arg(long, default_value_t = 8484)]
         port: u16,
     },
-    /// Show the known devices, the last pull and queued or failed work.
     Status,
-    /// Full-screen terminal app: recordings, transcripts, summaries, pipeline, device pull,
-    /// settings. Starts with the setup when there is no configuration yet.
     Tui,
+}
+
+/// The clap command with every heading and help line in the current locale. Clap's own words
+/// (default, possible values, the built-in help and version flags) are replaced by catalog text.
+fn command() -> Command {
+    localize(Cli::command(), "help")
+}
+
+fn localize(mut cmd: Command, key: &str) -> Command {
+    let options = t!("help.options").into_owned();
+    let arguments = t!("help.arguments").into_owned();
+    let names: Vec<String> = cmd
+        .get_subcommands()
+        .map(|s| s.get_name().to_string())
+        .collect();
+    for name in names {
+        cmd = cmd.mut_subcommand(&name, |s| localize(s, &format!("help.{name}")));
+    }
+    cmd = cmd
+        .about(t!(format!("{key}.about")))
+        .help_template(format!(
+            "{{about-with-newline}}\n{} {{usage}}\n\n{{all-args}}",
+            t!("help.usage")
+        ))
+        .subcommand_help_heading(t!("help.commands").into_owned())
+        .subcommand_value_name(t!("help.command").into_owned())
+        // Its text is clap's, in English only; `<command> --help` does the same job.
+        .disable_help_subcommand(true)
+        .disable_help_flag(true)
+        .mut_args(|a| {
+            let default: Vec<_> = a
+                .get_default_values()
+                .iter()
+                .map(|v| v.to_string_lossy())
+                .collect();
+            let values: Vec<_> = a
+                .get_possible_values()
+                .into_iter()
+                .map(|v| v.get_name().to_string())
+                .collect();
+            let help = t!(
+                format!("{key}.{}", a.get_id()),
+                default = default.join(", "),
+                values = values.join(", ")
+            );
+            let heading = if a.is_positional() {
+                &arguments
+            } else {
+                &options
+            };
+            // Clap's English "[default: …]" and "[possible values: …]" are in the catalog text.
+            let takes_value = a.get_action().takes_values();
+            a.help(help)
+                .help_heading(heading.clone())
+                .hide_default_value(takes_value)
+                .hide_possible_values(takes_value)
+        })
+        .arg(flag("help", 'h', ArgAction::Help, &options));
+    if cmd.get_version().is_some() {
+        cmd =
+            cmd.disable_version_flag(true)
+                .arg(flag("version", 'V', ArgAction::Version, &options));
+    }
+    cmd
+}
+
+/// Clap's built-in `--help` / `--version`, with the catalog text (`help.help`, `help.version`).
+fn flag(name: &'static str, short: char, action: ArgAction, heading: &str) -> Arg {
+    Arg::new(name)
+        .short(short)
+        .long(name)
+        .action(action)
+        .help(t!(format!("help.{name}")))
+        .help_heading(heading.to_string())
 }
 
 fn run(cmd: Cmd) -> commands::Outcome {
@@ -110,15 +169,49 @@ fn run(cmd: Cmd) -> commands::Outcome {
 }
 
 fn main() -> ExitCode {
-    let cmd = Cli::parse().cmd;
-    // Once, before any message is printed.
+    // Once, before any message (the help included) is printed.
     let lang = config::home().map_or_else(|_| i18n::language(None), |h| i18n::ui_language(&h));
     rust_i18n::set_locale(lang.as_str());
+    let cmd = match Cli::from_arg_matches(&command().get_matches()) {
+        Ok(cli) => cli.cmd,
+        Err(e) => e.exit(),
+    };
     match run(cmd) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("{}", rust_i18n::t!("error.prefix", message = e));
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// A command or option without a catalog entry would show its bare key (`help.…`) as help.
+    /// The French catalog has the same keys (checked in `i18n`).
+    #[test]
+    fn every_command_and_option_has_help() {
+        fn check(cmd: &clap::Command) {
+            let about = cmd.get_about().map(ToString::to_string).unwrap_or_default();
+            assert!(
+                !about.is_empty() && !about.contains("help."),
+                "{}: {about}",
+                cmd.get_name()
+            );
+            for a in cmd.get_arguments() {
+                let help = a.get_help().map(ToString::to_string).unwrap_or_default();
+                assert!(
+                    !help.is_empty() && !help.contains("help."),
+                    "{}: {help}",
+                    a.get_id()
+                );
+            }
+            cmd.get_subcommands().for_each(check);
+        }
+        let mut cmd = super::command();
+        // Clap's own consistency checks, on every subcommand (they run lazily otherwise).
+        cmd.clone().debug_assert();
+        cmd.build();
+        check(&cmd);
     }
 }
