@@ -33,17 +33,11 @@ mod fakes {
     use std::future::Future;
     use std::path::{Path, PathBuf};
     use std::pin::pin;
-    use std::sync::Arc;
-    use std::task::{Context, Poll, Wake, Waker};
+    use std::task::{Context, Poll, Waker};
 
     /// Fakes never yield, so a busy-poll executor is enough (no async runtime in core).
     pub fn block_on<F: Future>(f: F) -> F::Output {
-        struct Noop;
-        impl Wake for Noop {
-            fn wake(self: Arc<Self>) {}
-        }
-        let waker = Waker::from(Arc::new(Noop));
-        let mut cx = Context::from_waker(&waker);
+        let mut cx = Context::from_waker(Waker::noop());
         let mut f = pin!(f);
         loop {
             if let Poll::Ready(v) = f.as_mut().poll(&mut cx) {

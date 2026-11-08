@@ -143,7 +143,9 @@ pub fn parse_list_page(p: &[u8]) -> Option<ListPage> {
         page: u16le(p, 9)?,
         entries: p
             .get(11..)?
-            .chunks_exact(10)
+            .as_chunks::<10>()
+            .0
+            .iter()
             .map(|e| {
                 (
                     u32::from_le_bytes([e[0], e[1], e[2], e[3]]),
