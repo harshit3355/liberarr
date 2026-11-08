@@ -12,6 +12,8 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 const API_KEY: &str = "0123456789abcdef0123456789abcdef-api";
@@ -72,8 +74,9 @@ const SUMMARY: &str = r###"{"title":"Point hebdo","summary_md":"## Contexte\nTes
 
 const SPEECH: &str = r#"{"language":"french","text":"Bonjour. Hello.","segments":[{"start":0.0,"end":1.0,"text":"Bonjour."},{"start":1.0,"end":2.0,"text":"Hello."}]}"#;
 
-/// `transcript` is the transcription endpoint's reply.
-async fn mock_provider(transcript: &'static str) -> String {
+/// `transcript` is the transcription endpoint's reply; while `llm_ok` is off the LLM replies with
+/// an invalid summary, so the summarize step fails.
+async fn mock_provider(transcript: &'static str, llm_ok: Arc<AtomicBool>) -> String {
     let app = Router::new()
         .route(
             "/v1/audio/transcriptions",
@@ -81,8 +84,13 @@ async fn mock_provider(transcript: &'static str) -> String {
         )
         .route(
             "/v1/chat/completions",
-            post(|| async {
-                serde_json::json!({"choices":[{"message":{"role":"assistant","content":SUMMARY}}]})
+            post(move || async move {
+                let content = if llm_ok.load(Ordering::SeqCst) {
+                    SUMMARY
+                } else {
+                    "not a summary"
+                };
+                serde_json::json!({"choices":[{"message":{"role":"assistant","content":content}}]})
                     .to_string()
             }),
         );
@@ -124,15 +132,16 @@ fn patch_action(port: u16, index: usize) -> u16 {
 }
 
 /// A fresh home (named after the test: tests run in parallel) whose `.env` points both steps at a
-/// mock provider, plus a synthetic recording.
-async fn setup(test: &str, transcript: &'static str) -> (TempHome, PathBuf) {
+/// mock provider, plus a synthetic recording and the mock's `llm_ok` switch (on).
+async fn setup(test: &str, transcript: &'static str) -> (TempHome, PathBuf, Arc<AtomicBool>) {
     let home = TempHome(std::env::temp_dir().join(format!(
         "liberarr-{test}-{}-{}",
         std::process::id(),
         jiff::Timestamp::now().as_nanosecond()
     )));
     std::fs::create_dir_all(&home.0).unwrap();
-    let base = mock_provider(transcript).await;
+    let llm_ok = Arc::new(AtomicBool::new(true));
+    let base = mock_provider(transcript, llm_ok.clone()).await;
     std::fs::write(
         home.0.join(".env"),
         format!(
@@ -150,12 +159,12 @@ async fn setup(test: &str, transcript: &'static str) -> (TempHome, PathBuf) {
     .unwrap();
     let audio = home.0.join("meeting.ogg");
     std::fs::write(&audio, synthetic_ogg()).unwrap();
-    (home, audio)
+    (home, audio, llm_ok)
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn process_e2e() {
-    let (home, audio) = setup("e2e", SPEECH).await;
+    let (home, audio, _) = setup("e2e", SPEECH).await;
     let out = liberarr(&home.0)
         .arg("process")
         .arg(&audio)
@@ -216,7 +225,7 @@ async fn process_e2e() {
 /// recording ends Done with the "no speech" marker.
 #[tokio::test(flavor = "multi_thread")]
 async fn process_no_speech() {
-    let (home, audio) = setup(
+    let (home, audio, _) = setup(
         "no-speech",
         r#"{"language":null,"text":"  ","segments":[]}"#,
     )
@@ -256,4 +265,86 @@ async fn process_no_speech() {
     );
     let notes = std::fs::read_dir(home.0.join("obsidian")).map_or(0, |d| d.count());
     assert_eq!(notes, 0);
+}
+
+/// A failed summary keeps the transcript; `rerun` then the next `process` reach Done. A rerun of
+/// the export rewrites the same note and keeps the owner's text outside the markers.
+#[tokio::test(flavor = "multi_thread")]
+async fn rerun_after_failure_keeps_outputs_and_owner_text() {
+    let (home, audio, llm_ok) = setup("rerun", SPEECH).await;
+    let process = || {
+        liberarr(&home.0)
+            .arg("process")
+            .arg(&audio)
+            .output()
+            .unwrap()
+    };
+    let rerun = |args: &[&str]| {
+        let out = liberarr(&home.0).arg("rerun").args(args).output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    llm_ok.store(false, Ordering::SeqCst);
+    assert!(!process().status.success());
+
+    let db = Db::open(&home.0.join("liberarr.db")).unwrap();
+    let items = db.list_items().await.unwrap();
+    assert_eq!(items[0].status, RecordingStatus::Failed);
+    let id = items[0].id.to_string();
+    let transcript = TranscriptRepo::get(&db, items[0].id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    llm_ok.store(true, Ordering::SeqCst);
+    rerun(&[&id]);
+    let out = process();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        db.list_items().await.unwrap()[0].status,
+        RecordingStatus::Done
+    );
+    let kept = TranscriptRepo::get(&db, items[0].id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(kept.text, transcript.text);
+    assert_eq!(kept.segments.len(), transcript.segments.len());
+    let jobs = db.list_for(items[0].id).await.unwrap();
+    let transcribes = jobs.iter().filter(|j| j.step == "transcribe").count();
+    assert_eq!(transcribes, 1, "the rerun starts at the failed step");
+    assert!(audio.exists());
+
+    let vault = home.0.join("obsidian");
+    let note = std::fs::read_dir(&vault)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let edited = format!(
+        "my intro\n{}my own notes\n",
+        std::fs::read_to_string(&note).unwrap()
+    );
+    std::fs::write(&note, edited).unwrap();
+    rerun(&[&id, "--step", "export"]);
+    assert!(process().status.success());
+    assert_eq!(
+        std::fs::read_dir(&vault).unwrap().count(),
+        1,
+        "same note rewritten"
+    );
+    let after = std::fs::read_to_string(&note).unwrap();
+    assert!(
+        after.starts_with("my intro\n") && after.ends_with("my own notes\n"),
+        "{after}"
+    );
+    assert_eq!(after.matches(START).count(), 1);
 }
