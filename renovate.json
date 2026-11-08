@@ -1,6 +1,8 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "skipInstalls=false: npm 12 --package-lock-only refuses registry tarballs of packages with bundleDependencies (EALLOWREMOTE, npm/cli#9800); a full install does not. Remove once that issue is fixed.",
   "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
   "minimumReleaseAge": "7 days",
-  "internalChecksFilter": "strict"
+  "internalChecksFilter": "strict",
+  "skipInstalls": false
 }
