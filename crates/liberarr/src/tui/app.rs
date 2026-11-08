@@ -674,11 +674,16 @@ impl Ui {
             tabs_area,
         );
         let none = |key: &str| vec![Line::styled(t!(key).into_owned(), theme::dim())];
+        let no_summary = if d.transcript.as_ref().is_some_and(|t| !t.has_speech()) {
+            "no_speech.detail"
+        } else {
+            "tui.no_summary"
+        };
         let lines: Vec<Line> = match TABS[d.tab] {
             Tab::Summary => d
                 .summary
                 .as_ref()
-                .map_or_else(|| none("tui.no_summary"), |s| markdown(&s.summary_md)),
+                .map_or_else(|| none(no_summary), |s| markdown(&s.summary_md)),
             Tab::Transcript => match &d.transcript {
                 None => none("tui.no_transcript"),
                 Some(t) if !t.has_speech() => none("no_speech.detail"),
@@ -699,9 +704,9 @@ impl Ui {
             Tab::Mindmap => d
                 .summary
                 .as_ref()
-                .map_or_else(|| none("tui.no_summary"), |s| mindmap(&s.mindmap)),
+                .map_or_else(|| none(no_summary), |s| mindmap(&s.mindmap)),
             Tab::Actions => match &d.summary {
-                None => none("tui.no_summary"),
+                None => none(no_summary),
                 Some(s) if s.actions.is_empty() => none("tui.no_actions"),
                 Some(s) => s
                     .actions

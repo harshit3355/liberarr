@@ -147,8 +147,9 @@ impl<R: RecordingRepo, T: TranscriptRepo, S: SummaryRepo, N: NoteStore>
 {
     /// Writes the note and returns its path. The file name is fixed on the first export (` (<id>)`
     /// is added when the name is taken), so later exports rewrite the same note. Only the name is
-    /// stored: the vault can move without stranding old recordings.
-    pub async fn run(&self, recording_id: i64) -> Result<PathBuf> {
+    /// stored: the vault can move without stranding old recordings. `None` (no note) when the
+    /// transcript has no speech.
+    pub async fn run(&self, recording_id: i64) -> Result<Option<PathBuf>> {
         let rec = self
             .recordings
             .get(recording_id)
@@ -159,6 +160,9 @@ impl<R: RecordingRepo, T: TranscriptRepo, S: SummaryRepo, N: NoteStore>
             .get(recording_id)
             .await?
             .ok_or_else(|| Error::NotFound("transcript".into()))?;
+        if !t.has_speech() {
+            return Ok(None);
+        }
         let s = self
             .summaries
             .get(recording_id)
@@ -189,7 +193,7 @@ impl<R: RecordingRepo, T: TranscriptRepo, S: SummaryRepo, N: NoteStore>
             &frontmatter(&rec, &self.tz),
         );
         self.notes.write_atomic(&path, &text)?;
-        Ok(path)
+        Ok(Some(path))
     }
 }
 
@@ -346,16 +350,46 @@ mod tests {
             tz: TimeZone::UTC,
             lang: Language::Fr,
         };
-        let a = block_on(uc.run(1)).unwrap();
-        let b = block_on(uc.run(2)).unwrap();
+        let a = block_on(uc.run(1)).unwrap().unwrap();
+        let b = block_on(uc.run(2)).unwrap().unwrap();
         assert_ne!(a, b);
         assert!(b.to_string_lossy().ends_with(" (2).md"));
         // The path is fixed on the first export: re-running rewrites the same note.
-        assert_eq!(block_on(uc.run(1)).unwrap(), a);
+        assert_eq!(block_on(uc.run(1)).unwrap(), Some(a.clone()));
         assert_eq!(notes.0.borrow().len(), 2);
         assert_eq!(
             recs.0.borrow()[0].export_path.as_deref(),
             a.file_name().map(Path::new)
         );
+    }
+
+    #[test]
+    fn export_without_speech_is_a_no_op() {
+        let recs = MemRecordings::default();
+        let (transcripts, summaries, notes) = (
+            MemTranscripts::default(),
+            MemSummaries::default(),
+            MemNotes::default(),
+        );
+        let id = block_on(recs.add(new_rec("2026-06-02T14:05:00Z"))).unwrap();
+        let silent = Transcript {
+            text: " ".into(),
+            segments: vec![],
+            ..transcript()
+        };
+        block_on(transcripts.save(id, &silent)).unwrap();
+        let uc = ExportToObsidian {
+            recordings: &recs,
+            transcripts: &transcripts,
+            summaries: &summaries,
+            notes: &notes,
+            vault: "/vault".into(),
+            tz: TimeZone::UTC,
+            lang: Language::Fr,
+        };
+        // No summary exists: a rerun of the export must not fail on it, nor write a note.
+        assert_eq!(block_on(uc.run(id)).unwrap(), None);
+        assert!(notes.0.borrow().is_empty());
+        assert_eq!(recs.0.borrow()[0].export_path, None);
     }
 }

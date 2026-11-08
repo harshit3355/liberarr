@@ -204,6 +204,7 @@ mod tests {
                 .run(id)
                 .await
                 .unwrap()
+                .unwrap()
             }
         };
         let first = export(&a, &db).await;

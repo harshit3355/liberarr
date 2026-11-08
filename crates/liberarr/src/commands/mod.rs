@@ -10,6 +10,7 @@ pub mod status;
 
 use crate::container::App;
 use liberarr_core::jobs::{JobQueue, JobStatus};
+use liberarr_core::transcription::TranscriptRepo;
 use rust_i18n::t;
 use std::io::{BufRead, IsTerminal, Write};
 
@@ -70,7 +71,17 @@ pub async fn process_and_report(app: &App, ids: &[i64]) -> Result<bool, liberarr
                     )
                 );
             }
-            Some(j) if j.status == JobStatus::Done => println!("{}", t!("process.done", id = id)),
+            Some(j) if j.status == JobStatus::Done => {
+                let silent = TranscriptRepo::get(&app.db, id)
+                    .await?
+                    .is_some_and(|t| !t.has_speech());
+                let key = if silent {
+                    "process.done_no_speech"
+                } else {
+                    "process.done"
+                };
+                println!("{}", t!(key, id = id));
+            }
             _ => println!("{}", t!("process.waiting", id = id)),
         }
     }
