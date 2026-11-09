@@ -245,11 +245,17 @@ impl Backend for App {
     async fn enqueue(&self, id: i64, step: &str) -> Result<i64> {
         self.db.enqueue(id, step).await
     }
-    async fn toggle_action(&self, id: i64, index: usize, done: bool) -> Result<MeetingSummary> {
+    async fn toggle_action(
+        &self,
+        id: i64,
+        index: usize,
+        action: &str,
+        done: bool,
+    ) -> Result<MeetingSummary> {
         ToggleAction {
             summaries: &self.db,
         }
-        .run(id, index, done)
+        .run(id, index, action, done)
         .await
     }
 }

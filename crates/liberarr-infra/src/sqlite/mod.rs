@@ -340,6 +340,42 @@ mod tests {
         assert_eq!(jobs[0].status, JobStatus::Queued);
     }
 
+    /// A toggle aimed at an action that is no longer at that index is refused and changes nothing.
+    #[tokio::test]
+    async fn toggle_refuses_a_stale_action() {
+        use liberarr_core::Error;
+        use liberarr_core::summaries::{Action, MeetingSummary, SummaryRepo, ToggleAction};
+
+        let t = TempDb::new("actions");
+        let db = Db::open(&t.path()).unwrap();
+        let id = db.add(new_rec("h1")).await.unwrap();
+        let action = |text: &str| Action {
+            action: text.into(),
+            owner: None,
+            due: None,
+            start: None,
+            done: false,
+        };
+        let summary = MeetingSummary {
+            title: "t".into(),
+            summary_md: "s".into(),
+            mindmap: "mindmap\n  root".into(),
+            actions: vec![action("call Bob"), action("send deck")],
+        };
+        SummaryRepo::save(&db, id, &summary).await.unwrap();
+        let toggle = ToggleAction { summaries: &db };
+
+        let s = toggle.run(id, 1, "send deck", true).await.unwrap();
+        assert!(!s.actions[0].done && s.actions[1].done);
+
+        let err = toggle.run(id, 0, "send deck", true).await.unwrap_err();
+        assert!(matches!(err, Error::Conflict(_)), "{err:?}");
+        let err = toggle.run(id, 2, "send deck", true).await.unwrap_err();
+        assert!(matches!(err, Error::NotFound(_)), "{err:?}");
+        let stored = SummaryRepo::get(&db, id).await.unwrap().unwrap();
+        assert!(!stored.actions[0].done && stored.actions[1].done);
+    }
+
     /// Issue #88: transcripts must not be readable by other local users.
     #[tokio::test]
     async fn db_files_are_owner_only() {

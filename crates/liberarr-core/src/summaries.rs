@@ -115,6 +115,15 @@ pub trait Llm {
 pub trait SummaryRepo {
     async fn save(&self, recording_id: i64, summary: &MeetingSummary) -> Result<()>;
     async fn get(&self, recording_id: i64) -> Result<Option<MeetingSummary>>;
+    /// Sets `done` in one atomic write, only while the action at `index` still reads `action`.
+    /// Returns whether it was set.
+    async fn set_action_done(
+        &self,
+        recording_id: i64,
+        index: usize,
+        action: &str,
+        done: bool,
+    ) -> Result<bool>;
 }
 
 pub struct Summarize<'a, T, L, S> {
@@ -140,7 +149,13 @@ impl<T: TranscriptRepo, L: Llm, S: SummaryRepo> Summarize<'_, T, L, S> {
         for attempt in 0..2 {
             let reply = self.llm.complete_json(&messages).await?;
             match parse_summary(&reply) {
-                Ok(s) => {
+                Ok(mut s) => {
+                    // A rerun keeps the owner's ticks on the actions whose text is unchanged.
+                    if let Some(prev) = self.summaries.get(recording_id).await? {
+                        for a in &mut s.actions {
+                            a.done = prev.actions.iter().any(|p| p.done && p.action == a.action);
+                        }
+                    }
                     self.summaries.save(recording_id, &s).await?;
                     return Ok(Some(s));
                 }
@@ -160,18 +175,29 @@ pub struct ToggleAction<'a, S> {
 }
 
 impl<S: SummaryRepo> ToggleAction<'_, S> {
-    pub async fn run(&self, recording_id: i64, index: usize, done: bool) -> Result<MeetingSummary> {
-        let mut s = self
+    /// `action` is the text the client saw at `index`: when a rerun has replaced the actions since,
+    /// the toggle fails with `Error::Conflict` instead of ticking another action.
+    pub async fn run(
+        &self,
+        recording_id: i64,
+        index: usize,
+        action: &str,
+        done: bool,
+    ) -> Result<MeetingSummary> {
+        let set = self
+            .summaries
+            .set_action_done(recording_id, index, action, done)
+            .await?;
+        let s = self
             .summaries
             .get(recording_id)
             .await?
             .ok_or_else(|| Error::NotFound("summary".into()))?;
-        s.actions
-            .get_mut(index)
-            .ok_or_else(|| Error::NotFound("action".into()))?
-            .done = done;
-        self.summaries.save(recording_id, &s).await?;
-        Ok(s)
+        match (set, s.actions.get(index)) {
+            (true, _) => Ok(s),
+            (false, None) => Err(Error::NotFound("action".into())),
+            (false, Some(_)) => Err(Error::Conflict("action".into())),
+        }
     }
 }
 
@@ -233,5 +259,42 @@ mod tests {
         assert_eq!(llm.calls.get(), 2);
         assert!(summaries.0.borrow().is_empty());
         assert_eq!(transcripts.saves.get(), 0);
+    }
+
+    #[test]
+    fn summarize_rerun_keeps_ticks_on_unchanged_actions() {
+        let rerun = r#"{"title":"t","summary_md":"s","mindmap":"mindmap\n  root",
+            "actions":[{"action":"new one"},{"action":"send deck"}]}"#;
+        let llm = FakeLlm::new(&[rerun]);
+        let transcripts = MemTranscripts::default();
+        transcripts.map.borrow_mut().insert(
+            1,
+            Transcript {
+                engine: "e".into(),
+                language: None,
+                text: "salut".into(),
+                segments: vec![],
+                has_timestamps: false,
+            },
+        );
+        let summaries = MemSummaries::default();
+        let prev = parse_summary(
+            r#"{"title":"t","summary_md":"s","mindmap":"mindmap\n  root",
+            "actions":[{"action":"send deck","done":true},{"action":"gone","done":true}]}"#,
+        )
+        .unwrap();
+        summaries.0.borrow_mut().insert(1, prev);
+        let uc = Summarize {
+            transcripts: &transcripts,
+            llm: &llm,
+            summaries: &summaries,
+            lang: Language::Fr,
+        };
+
+        block_on(uc.run(1)).unwrap();
+
+        let saved = summaries.0.borrow()[&1].clone();
+        let done: Vec<_> = saved.actions.iter().map(|a| a.done).collect();
+        assert_eq!(done, [false, true]);
     }
 }

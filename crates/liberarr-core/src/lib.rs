@@ -198,6 +198,20 @@ mod fakes {
         async fn get(&self, recording_id: i64) -> Result<Option<MeetingSummary>> {
             Ok(self.0.borrow().get(&recording_id).cloned())
         }
+        async fn set_action_done(
+            &self,
+            recording_id: i64,
+            index: usize,
+            action: &str,
+            done: bool,
+        ) -> Result<bool> {
+            let mut map = self.0.borrow_mut();
+            let a = map
+                .get_mut(&recording_id)
+                .and_then(|s| s.actions.get_mut(index))
+                .filter(|a| a.action == action);
+            Ok(a.map(|a| a.done = done).is_some())
+        }
     }
 
     /// Replies with the scripted answers in order and counts calls.

@@ -29,6 +29,7 @@ impl From<Error> for ApiError {
     fn from(e: Error) -> Self {
         match e {
             Error::NotFound(_) => ApiError(StatusCode::NOT_FOUND, "not found"),
+            Error::Conflict(_) => ApiError(StatusCode::CONFLICT, "conflict"),
             _ => ApiError(StatusCode::INTERNAL_SERVER_ERROR, "internal error"),
         }
     }
@@ -278,6 +279,8 @@ pub async fn rerun<B: Backend>(
 
 #[derive(Deserialize)]
 pub struct Toggle {
+    /// The text the client saw at that index: the server refuses with 409 when it has changed.
+    action: String,
     done: bool,
 }
 
@@ -287,7 +290,10 @@ pub async fn toggle_action<B: Backend>(
     Json(body): Json<Toggle>,
 ) -> Result<Json<Vec<Action>>, ApiError> {
     Ok(Json(
-        s.backend.toggle_action(id, index, body.done).await?.actions,
+        s.backend
+            .toggle_action(id, index, &body.action, body.done)
+            .await?
+            .actions,
     ))
 }
 

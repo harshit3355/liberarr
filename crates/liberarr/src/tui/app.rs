@@ -342,8 +342,12 @@ impl Ui {
                     KeyCode::PageDown => d.scroll = d.scroll.saturating_add(10),
                     KeyCode::Char(' ') if on_actions && d.action < actions => {
                         let (id, index) = (d.id, d.action);
-                        let done = d.summary.as_ref().is_some_and(|s| !s.actions[index].done);
-                        let updated = self.rt.block_on(self.app.toggle_action(id, index, done));
+                        let Some(a) = d.summary.as_ref().map(|s| s.actions[index].clone()) else {
+                            return Ok(None);
+                        };
+                        let updated = self
+                            .rt
+                            .block_on(self.app.toggle_action(id, index, &a.action, !a.done));
                         match updated {
                             Ok(s) => {
                                 if let View::Detail(d) = &mut self.view {

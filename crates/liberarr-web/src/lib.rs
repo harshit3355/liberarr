@@ -28,11 +28,13 @@ pub trait Backend: Send + Sync + 'static {
     fn jobs(&self, id: i64) -> impl Future<Output = Result<Vec<JobInfo>>> + Send;
     /// Queues `step` (already validated against `STEPS`); the worker picks it up.
     fn enqueue(&self, id: i64, step: &str) -> impl Future<Output = Result<i64>> + Send;
-    /// `Error::NotFound` when the summary or the action index does not exist.
+    /// `Error::NotFound` when the summary or the action index does not exist,
+    /// `Error::Conflict` when the action at `index` no longer reads `action`.
     fn toggle_action(
         &self,
         id: i64,
         index: usize,
+        action: &str,
         done: bool,
     ) -> impl Future<Output = Result<MeetingSummary>> + Send;
 }
@@ -155,9 +157,18 @@ mod tests {
             });
             Ok(id)
         }
-        async fn toggle_action(&self, id: i64, index: usize, done: bool) -> Result<MeetingSummary> {
+        async fn toggle_action(
+            &self,
+            id: i64,
+            index: usize,
+            action: &str,
+            done: bool,
+        ) -> Result<MeetingSummary> {
             if id != 1 || index != 0 {
                 return Err(liberarr_core::Error::NotFound("action".into()));
+            }
+            if action != "a" {
+                return Err(liberarr_core::Error::Conflict("action".into()));
             }
             Ok(MeetingSummary {
                 title: "t".into(),
@@ -346,16 +357,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn patch_action_toggles_and_404_out_of_range() {
+    async fn patch_action_toggles_409_on_stale_text_404_out_of_range() {
         let app = app();
-        let patch = |id: i64, index: usize| {
+        let patch_text = |id: i64, index: usize, action: &str| {
             req(
                 "PATCH",
                 &format!("/api/recordings/{id}/actions/{index}"),
                 Some("key"),
-                r#"{"done":true}"#,
+                &format!(r#"{{"action":"{action}","done":true}}"#),
             )
         };
+        let patch = |id, index| patch_text(id, index, "a");
+        assert_eq!(
+            status(&app, patch_text(1, 0, "other")).await,
+            StatusCode::CONFLICT
+        );
         let res = app.clone().oneshot(patch(1, 0)).await.expect("response");
         assert_eq!(res.status(), StatusCode::OK);
         let body = axum::body::to_bytes(res.into_body(), 1 << 20)

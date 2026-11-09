@@ -242,6 +242,35 @@ impl SummaryRepo for Db {
         })
         .await
     }
+
+    async fn set_action_done(
+        &self,
+        recording_id: i64,
+        index: usize,
+        action: &str,
+        done: bool,
+    ) -> Result<bool> {
+        let Ok(index) = i64::try_from(index) else {
+            return Ok(false);
+        };
+        let action = action.to_owned();
+        self.run(move |c| {
+            // One statement: a concurrent toggle or summary save cannot interleave with it.
+            let n = c.execute(
+                "UPDATE summaries
+                 SET actions = json_set(actions, '$[' || ?2 || '].done', json(?3))
+                 WHERE recording_id = ?1 AND json_extract(actions, '$[' || ?2 || '].action') = ?4",
+                params![
+                    recording_id,
+                    index,
+                    if done { "true" } else { "false" },
+                    action
+                ],
+            )?;
+            Ok(n == 1)
+        })
+        .await
+    }
 }
 
 impl DeviceLedger for Db {

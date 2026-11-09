@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api } from '../../shared/api'
+import { api, ApiError } from '../../shared/api'
 
 export type Status = 'processing' | 'failed' | 'done'
 
@@ -85,12 +85,19 @@ export function useRerun(id: number) {
 export function useToggleAction(id: number) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ index, done }: { index: number; done: boolean }) =>
-      api<Action[]>(`/api/recordings/${id}/actions/${index}`, { method: 'PATCH', body: JSON.stringify({ done }) }),
+    // `action` is the text shown at `index`: the server answers 409 when a rerun has replaced it.
+    mutationFn: ({ index, action, done }: { index: number; action: string; done: boolean }) =>
+      api<Action[]>(`/api/recordings/${id}/actions/${index}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ action, done }),
+      }),
     // The PATCH returns the whole updated array: put it straight into the cached detail.
     onSuccess: (actions) =>
       qc.setQueryData<RecordingDetail>(['recordings', id], (d) =>
         d?.summary ? { ...d, summary: { ...d.summary, actions } } : d,
       ),
+    onError: (e) => {
+      if (e instanceof ApiError && e.status === 409) void qc.invalidateQueries({ queryKey: ['recordings', id] })
+    },
   })
 }

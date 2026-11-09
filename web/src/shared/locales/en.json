@@ -46,6 +46,7 @@
       "title": "Actions",
       "none": "No actions.",
       "updateError": "Unable to update the action.",
+      "stale": "The actions changed since this page loaded. They have been reloaded: try again.",
       "markDone": "Mark “{{action}}” as done",
       "done": "Done",
       "action": "Action",

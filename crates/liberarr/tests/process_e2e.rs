@@ -119,8 +119,8 @@ fn http(port: u16, request: &str) -> std::io::Result<u16> {
         .unwrap_or(0))
 }
 
-fn patch_action(port: u16, index: usize) -> u16 {
-    let body = r#"{"done":true}"#;
+fn patch_action(port: u16, index: usize, action: &str) -> u16 {
+    let body = format!(r#"{{"action":"{action}","done":true}}"#);
     http(
         port,
         &format!(
@@ -213,10 +213,15 @@ async fn process_e2e() {
         std::thread::sleep(Duration::from_millis(100));
         http(port, health).is_ok_and(|c| c == 200)
     });
-    let (in_range, out_of_range) = (patch_action(port, 0), patch_action(port, 5));
+    let stale = patch_action(port, 0, "Autre action");
+    let (in_range, out_of_range) = (
+        patch_action(port, 0, "Envoyer le budget"),
+        patch_action(port, 5, "Envoyer le budget"),
+    );
     server.kill().unwrap();
     let _ = server.wait();
     assert!(up, "serve did not come up");
+    assert_eq!(stale, 409);
     assert_eq!(in_range, 200);
     assert_eq!(out_of_range, 404);
 }

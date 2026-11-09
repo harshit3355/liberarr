@@ -46,6 +46,7 @@
       "title": "Actions",
       "none": "Aucune action.",
       "updateError": "Impossible de mettre à jour l'action.",
+      "stale": "Les actions ont changé depuis le chargement de la page. Elles ont été rechargées : réessayez.",
       "markDone": "Marquer « {{action}} » comme faite",
       "done": "Fait",
       "action": "Action",

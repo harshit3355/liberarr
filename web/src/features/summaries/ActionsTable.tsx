@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { ApiError } from '../../shared/api'
 import { formatTimestamp } from '../../shared/time'
 import { useToggleAction, type Action } from '../recordings/api'
 
@@ -17,7 +18,11 @@ export function ActionsTable({ recordingId, actions, onSeek }: Props) {
     <div className="overflow-x-auto">
       {toggle.isError && (
         <p role="alert" className="mb-2 text-sm text-red-400">
-          {t('summaries.actions.updateError')}
+          {t(
+            toggle.error instanceof ApiError && toggle.error.status === 409
+              ? 'summaries.actions.stale'
+              : 'summaries.actions.updateError',
+          )}
         </p>
       )}
       <table className="w-full text-sm">
@@ -38,7 +43,7 @@ export function ActionsTable({ recordingId, actions, onSeek }: Props) {
                   type="checkbox"
                   aria-label={t('summaries.actions.markDone', { action: a.action })}
                   checked={a.done}
-                  onChange={(e) => toggle.mutate({ index, done: e.target.checked })}
+                  onChange={(e) => toggle.mutate({ index, action: a.action, done: e.target.checked })}
                 />
               </td>
               <td className={`p-2 ${a.done ? 'text-zinc-400 line-through' : ''}`}>{a.action}</td>
