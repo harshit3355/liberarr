@@ -96,23 +96,40 @@ impl KeyStore for FileKeyStore {
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir).map_err(|_| err("cannot create the device folder"))?;
         }
-        let tmp = self.path.with_extension("tmp");
-        let _ = std::fs::remove_file(&tmp);
-        let write = || -> std::io::Result<()> {
-            let mut f = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&tmp)?;
-            f.write_all(&out)?;
-            f.sync_all()?;
-            std::fs::rename(&tmp, &self.path)
-        };
-        write().map_err(|_| {
-            let _ = std::fs::remove_file(&tmp);
-            err("cannot write the key file")
-        })
+        // A replaced key pair may still be needed for recordings not yet pulled: keep the
+        // current file, as is (same encryption), in `keys.bin.prev`.
+        // shortcut: one generation only, a second replacement overwrites it; keep a history if
+        // replacements become frequent.
+        let old = self.load().unwrap_or_default();
+        if old
+            .iter()
+            .any(|o| all.iter().all(|n| n.private_pem != o.private_pem))
+        {
+            let raw = std::fs::read(&self.path).map_err(|_| err("cannot read the key file"))?;
+            write_0600(&self.path.with_extension("bin.prev"), &raw)
+                .map_err(|_| err("cannot keep the previous key file"))?;
+        }
+        write_0600(&self.path, &out).map_err(|_| err("cannot write the key file"))
     }
+}
+
+/// Writes a temp file (0600 from creation) then renames it over `path`.
+fn write_0600(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let tmp = path.with_extension("tmp");
+    let _ = std::fs::remove_file(&tmp);
+    let write = || -> std::io::Result<()> {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, path)
+    };
+    write().inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
 }
 
 #[cfg(test)]
@@ -200,5 +217,32 @@ mod tests {
         // A second save (replace) keeps the mode.
         store.save(&[material("bb")]).unwrap();
         assert_eq!(mode(&path), 0o600);
+    }
+
+    #[test]
+    fn replacing_the_key_pair_keeps_the_previous_file() {
+        let d = dir();
+        let path = d.path().join("keys.bin");
+        let prev = d.path().join("keys.bin.prev");
+        let store = FileKeyStore::new(path.clone(), "k");
+        store.save(&[material("aa")]).unwrap();
+        // Same pair (signature refresh): no backup.
+        store.save(&[material("aa")]).unwrap();
+        assert!(!prev.exists());
+
+        let old = std::fs::read(&path).unwrap();
+        let mut new = material("aa");
+        new.private_pem = "new-private".into();
+        store.save(&[new]).unwrap();
+        assert_eq!(
+            std::fs::read(&prev).unwrap(),
+            old,
+            "same bytes, same encryption"
+        );
+        let mode = std::fs::metadata(&prev).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let kept = FileKeyStore::new(prev, "k").load().unwrap();
+        assert_eq!(kept[0].private_pem, material("aa").private_pem);
+        assert_eq!(store.load().unwrap()[0].private_pem, "new-private");
     }
 }
