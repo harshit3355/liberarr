@@ -4,11 +4,12 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
 
 pub const COOKIE: &str = "liberarr_session";
-const SESSION_SECS: i64 = 14 * 24 * 3600;
+const SESSION_MS: i64 = 14 * 24 * 3600 * 1000;
 const MAX_FAILURES: u32 = 5;
 const WINDOW: Duration = Duration::from_secs(15 * 60);
 
@@ -27,6 +28,10 @@ pub struct Auth {
     session_key: [u8; 32],
     /// Part of every session MAC: changing the admin password revokes existing sessions.
     password_hash: [u8; 32],
+    /// Sessions issued at or before this instant (ms) were logged out.
+    // shortcut: in memory, so a restart forgets logouts until the 14-day expiry; persist it if
+    // that matters.
+    revoked_before: AtomicI64,
     // shortcut: per-process and keyed on the peer address, so behind a reverse proxy all clients
     // share one budget; upgrade to a trusted X-Forwarded-For if that matters.
     failures: Mutex<HashMap<IpAddr, (u32, Instant)>>,
@@ -52,6 +57,7 @@ impl Auth {
             cfg,
             session_key,
             failures: Mutex::default(),
+            revoked_before: AtomicI64::new(0),
         }
     }
 
@@ -62,8 +68,9 @@ impl Auth {
         hex(&mac.finalize().into_bytes())
     }
 
+    /// Milliseconds, so a logout and the next login rarely share a tick.
     fn now() -> i64 {
-        jiff::Timestamp::now().as_second()
+        jiff::Timestamp::now().as_millisecond()
     }
 
     fn cookie(&self, value: &str, max_age: i64) -> String {
@@ -77,11 +84,14 @@ impl Auth {
 
     /// `Set-Cookie` value for a fresh 14-day session.
     pub fn session_cookie(&self) -> String {
-        let expiry = Self::now() + SESSION_SECS;
-        self.cookie(&format!("{expiry}.{}", self.tag(expiry)), SESSION_SECS)
+        let expiry = Self::now() + SESSION_MS;
+        self.cookie(&format!("{expiry}.{}", self.tag(expiry)), SESSION_MS / 1000)
     }
 
-    pub fn clear_cookie(&self) -> String {
+    /// Clears the cookie and revokes every session issued so far, including copies of it.
+    pub fn logout(&self) -> String {
+        self.revoked_before
+            .fetch_max(Self::now(), Ordering::Relaxed);
         self.cookie("", 0)
     }
 
@@ -115,7 +125,17 @@ impl Auth {
         let Ok(expiry) = expiry.parse::<i64>() else {
             return false;
         };
-        ct_eq(tag, &self.tag(expiry)) && expiry > Self::now()
+        ct_eq(tag, &self.tag(expiry))
+            && expiry > Self::now()
+            && expiry - SESSION_MS > self.revoked_before.load(Ordering::Relaxed)
+    }
+
+    /// IPv6 peers share one budget per /64: SLAAC lets a host rotate addresses inside it.
+    fn rate_key(ip: IpAddr) -> IpAddr {
+        match ip.to_canonical() {
+            IpAddr::V6(v6) => IpAddr::V6((v6.to_bits() & !u128::from(u64::MAX)).into()),
+            v4 => v4,
+        }
     }
 
     /// Counts one login attempt for `ip` and says whether it may proceed. Check and count share
@@ -123,7 +143,7 @@ impl Auth {
     pub fn begin_attempt(&self, ip: IpAddr) -> bool {
         let mut map = self.failures.lock().unwrap_or_else(|e| e.into_inner());
         map.retain(|_, (_, since)| since.elapsed() < WINDOW);
-        let entry = map.entry(ip).or_insert((0, Instant::now()));
+        let entry = map.entry(Self::rate_key(ip)).or_insert((0, Instant::now()));
         if entry.0 >= MAX_FAILURES {
             return false;
         }
@@ -135,6 +155,6 @@ impl Auth {
         self.failures
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .remove(&ip);
+            .remove(&Self::rate_key(ip));
     }
 }

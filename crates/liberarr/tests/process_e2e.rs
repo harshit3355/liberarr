@@ -147,13 +147,14 @@ async fn setup(test: &str, transcript: &'static str) -> (TempHome, PathBuf, Arc<
         format!(
             "LIBERARR_SECRET_KEY=fedcba9876543210fedcba9876543210-secret\n\
              LIBERARR_API_KEY={API_KEY}\n\
-             LIBERARR_ADMIN_PASSWORD=pw-for-tests\n\
+             LIBERARR_ADMIN_PASSWORD={pw}\n\
              LIBERARR_TRANSCRIBE_BASE_URL={base}\n\
              LIBERARR_TRANSCRIBE_API_KEY=sk-test\n\
              LIBERARR_TRANSCRIBE_MODEL=whisper-1\n\
              LIBERARR_LLM_BASE_URL={base}\n\
              LIBERARR_LLM_API_KEY=sk-test\n\
-             LIBERARR_LLM_MODEL=gpt-test\n"
+             LIBERARR_LLM_MODEL=gpt-test\n",
+            pw = "pw".repeat(16),
         ),
     )
     .unwrap();

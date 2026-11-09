@@ -302,6 +302,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn logout_revokes_copied_session_cookie() {
+        let app = app();
+        let login = app
+            .clone()
+            .oneshot(req(
+                "POST",
+                "/api/auth/login",
+                None,
+                r#"{"username":"admin","password":"pw"}"#,
+            ))
+            .await
+            .expect("response");
+        let cookie = login.headers()[header::SET_COOKIE]
+            .to_str()
+            .expect("cookie")
+            .split(';')
+            .next()
+            .expect("pair")
+            .to_owned();
+        let with_cookie = |method: &str, uri: &str| {
+            let mut r = req(method, uri, None, "");
+            r.headers_mut()
+                .insert(header::COOKIE, cookie.parse().expect("header"));
+            r
+        };
+        assert_eq!(
+            status(&app, with_cookie("GET", "/api/recordings")).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status(&app, with_cookie("POST", "/api/auth/logout")).await,
+            StatusCode::NO_CONTENT
+        );
+        // A copy of the cookie kept from before the logout no longer opens the API.
+        assert_eq!(
+            status(&app, with_cookie("GET", "/api/recordings")).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
+    async fn login_rate_limit_spans_an_ipv6_64() {
+        let app = app();
+        let from = |ip: &str| {
+            let mut r = req(
+                "POST",
+                "/api/auth/login",
+                None,
+                r#"{"username":"admin","password":"nope"}"#,
+            );
+            let peer = SocketAddr::new(ip.parse().expect("ip"), 9);
+            r.extensions_mut().insert(ConnectInfo(peer));
+            r
+        };
+        // Rotating the low 64 bits does not buy new attempts.
+        for i in 0..5 {
+            let ip = if i % 2 == 0 {
+                "2001:db8::1"
+            } else {
+                "2001:db8::2"
+            };
+            assert_eq!(status(&app, from(ip)).await, StatusCode::UNAUTHORIZED);
+        }
+        assert_eq!(
+            status(&app, from("2001:db8::3")).await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        // Another /64 keeps its own budget.
+        assert_eq!(
+            status(&app, from("2001:db8:0:1::1")).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
     async fn api_key_header_authorizes() {
         let app = app();
         assert_eq!(

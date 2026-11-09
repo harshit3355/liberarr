@@ -28,7 +28,7 @@ Lines are `NAME=value`; `#` starts a comment.
 |---|---|
 | `LIBERARR_SECRET_KEY` | Encrypts the stored device keys. At least 32 characters. **Never change it**: the stored device keys would become unreadable. |
 | `LIBERARR_API_KEY` | Key for scripts calling the web API (`X-API-Key` header). At least 32 characters. |
-| `LIBERARR_ADMIN_PASSWORD` | Web UI password of the `admin` user. |
+| `LIBERARR_ADMIN_PASSWORD` | Web UI password of the `admin` user. At least 32 characters. |
 | `LIBERARR_TRANSCRIBE_PROVIDER` | Transcription provider: `openai`, `openai-compatible`, `mistral` or `openrouter`. Empty means `openai-compatible`. |
 | `LIBERARR_TRANSCRIBE_BASE_URL` | Base URL of its API (`http://` or `https://`). |
 | `LIBERARR_TRANSCRIBE_API_KEY` | Its API key. |

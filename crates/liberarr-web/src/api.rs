@@ -95,7 +95,7 @@ pub async fn login<B: Backend>(
 pub async fn logout<B: Backend>(State(s): State<AppState<B>>) -> Response {
     (
         StatusCode::NO_CONTENT,
-        [(header::SET_COOKIE, s.auth.clear_cookie())],
+        [(header::SET_COOKIE, s.auth.logout())],
     )
         .into_response()
 }
