@@ -10,13 +10,13 @@ You need Rust (version pinned in `rust-toolchain.toml`) and Node (build-time onl
 
 ```sh
 mise trust      # once, to allow the repository's mise.toml
-mise install    # Rust from rust-toolchain.toml, Node pinned in mise.toml
+mise install    # Rust from rust-toolchain.toml, Node from .node-version
 mise run build  # web UI, then the release binary
 ```
 
 ## Without mise
 
-Install [rustup](https://rustup.rs) (it reads `rust-toolchain.toml` by itself) and Node, the version pinned in `mise.toml`. Then:
+Install [rustup](https://rustup.rs) (it reads `rust-toolchain.toml` by itself) and Node, the version pinned in `.node-version`. Then:
 
 ```sh
 npm --prefix web ci && npm --prefix web run build   # builds web/dist, embedded into the binary

@@ -2,12 +2,8 @@
 # rustup and npm keep working without mise. See docs/development.md.
 
 [settings]
-# Rust comes from rust-toolchain.toml, so the version lives in one place.
-idiomatic_version_file_enable_tools = ["rust"]
-
-[tools]
-node = "26.13.0"
-# rust: installed too, at the version (and with the components) of rust-toolchain.toml.
+# Rust comes from rust-toolchain.toml and Node from .node-version (also read by CI), so each version lives in one place.
+idiomatic_version_file_enable_tools = ["rust", "node"]
 
 [tasks.build]
 description = "Build the web UI, then the release binary"

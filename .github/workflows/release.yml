@@ -3,6 +3,11 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Builds every target without publishing, so a broken action bump or a retired runner fails before a tag.
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,7 +19,7 @@ jobs:
       matrix:
         include:
           - target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-15
           - target: x86_64-apple-darwin
             os: macos-15-intel
           - target: x86_64-unknown-linux-gnu
@@ -28,9 +33,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Full history, to check that a tag points at a commit of main.
+          fetch-depth: 0
+      - name: Check that the tagged commit is on main
+        if: startsWith(github.ref, 'refs/tags/')
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "26"
+          node-version-file: .node-version
           # No npm cache on a release: a poisoned cache would end up in the published binary.
           package-manager-cache: false
       - name: Build the web UI (embedded in the binary)
@@ -41,16 +51,18 @@ jobs:
       - name: Install the BlueZ client headers (btleplug on Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+      # Release profile: the build below reuses the compiled dependencies.
+      - run: cargo test --workspace --release --locked
       - run: cargo build --release --locked
       - name: Package
         run: |
           version="$(./target/release/liberarr --version)"
-          if [ "$version" != "liberarr ${GITHUB_REF_NAME#v}" ]; then
+          if [[ "$GITHUB_REF" == refs/tags/* && "$version" != "liberarr ${GITHUB_REF_NAME#v}" ]]; then
             echo "Tag $GITHUB_REF_NAME does not match '$version'" >&2
             exit 1
           fi
           name="liberarr-${{ matrix.target }}"
-          tar -C target/release -czf "$name.tar.gz" liberarr
+          tar -czf "$name.tar.gz" LICENSE NOTICE -C target/release liberarr
           shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -62,6 +74,7 @@ jobs:
 
   release:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-26.04
     permissions:
       contents: write
