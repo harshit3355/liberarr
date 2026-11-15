@@ -8,8 +8,22 @@
 **Free your Plaud recordings: transcripts, summaries and notes with the AI provider you choose.**
 
 [![CI](https://github.com/hocinehacherouf/liberarr/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/hocinehacherouf/liberarr/actions/workflows/rust.yml)
+[![Status: work in progress](https://img.shields.io/badge/status-work_in_progress-orange)](#status)
 [![License: MIT](https://img.shields.io/github/license/hocinehacherouf/liberarr)](LICENSE)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/hocinehacherouf/liberarr/badge)](https://scorecard.dev/viewer/?uri=github.com/hocinehacherouf/liberarr)
+
+</div>
+
+<a id="status"></a>
+
+> [!WARNING]
+> **Work in progress.** Liberarr is under active development and no release is published yet: for now, [build it from source](docs/development.md). Commands, settings and the data format can still change, and some things will break. Bug reports are welcome.
+
+<div align="center">
+
+<img src="docs/assets/demo.gif" alt="The Liberarr terminal app: the recordings on the left; on the right the summary, the mind map and the actions of the selected recording; the pipeline status at the bottom" width="880">
+
+<sub>The terminal app (`liberarr tui`), on fictional recordings.</sub>
 
 </div>
 
@@ -28,13 +42,13 @@ Liberarr is an independent project, **not affiliated with, endorsed by or sponso
 - **Transcript**, timestamped with most models, French and English mixed in the same recording.
 - **Summary**, **mind map** and **action table** for each recording.
 - **Obsidian export:** each recording becomes a Markdown note in the folder of your choice.
-- **Terminal app** (`liberarr tui`): browse recordings, read summaries, tick actions, rerun a step.
+- **Terminal app** (`liberarr tui`): one dashboard with the recordings, the selected one's summary, transcript, mind map and actions to tick, the pipeline and the device pull.
 - **Local web UI** (`liberarr serve`): read recordings, play the audio next to the transcript, rerun a failed step, behind a login.
 - **English and French**, for the interface and for the summaries.
 
 ## Install
 
-Download the archive for your platform from the [releases page](https://github.com/hocinehacherouf/liberarr/releases), check it and put `liberarr` in your `PATH`: see [docs/install.md](docs/install.md). macOS (Apple silicon, Intel) and Linux (x86-64, ARM64).
+No release is published yet: for now, build from source with [docs/development.md](docs/development.md). Once a release is out, download the archive for your platform from the [releases page](https://github.com/hocinehacherouf/liberarr/releases), check it and put `liberarr` in your `PATH`: see [docs/install.md](docs/install.md). macOS (Apple silicon, Intel) and Linux (x86-64, ARM64).
 
 ## Quick start
 
